@@ -7,15 +7,15 @@
 
 #define PI 3.14159
 
-#define XSIZE		95
-#define YSIZE		55
-#define LINESIZE	6*95+93
+#define LONG_SIZE		95
+#define LAT_SIZE		55
+#define LINESIZE	8*LAT_SIZE+LAT_SIZE - 3
 
 #define TIMESTEPS	50
 //#define DESIRED_ROW	
 //#define DESIRED_COL
-#define STARTING_ROW	30
-#define STARTING_COL	75
+#define STARTING_ROW	5
+#define STARTING_COL	5
 //What is the time limit? How long will the birds keep flying/migrating before they 
 //just give up?
 
@@ -40,11 +40,34 @@ __global__ void get_resultant(float * u, float* v,float* resultantMatrix,float* 
 
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-	int index = x + y * XSIZE; 
+	int index = x + y * LONG_SIZE; 
 
-	if(x < 95) {
+	if(x < LONG_SIZE) {
 		resultantMatrix[index] = hypotf(u[index],v[index]);
-		angle = atanf(u[index]/v[index]) * (180/PI);
+		if((v[index] >0)&&( u[index] >0)) {
+			angle = atanf(u[index]/v[index]) * (180/PI);
+		}
+		else if ((v[index] > 0)&&( u[index] < 0)){
+			angle = 360 - atanf(u[index]/v[index]) * (180/PI);
+		}
+		else if ((v[index] < 0)&&( u[index] > 0)){
+			angle = 180 - atanf(u[index]/v[index]) * (180/PI);
+		}
+		else if ((v[index] < 0)&&( u[index] < 0)){
+			angle = 180 + atanf(u[index]/v[index]) * (180/PI);
+		}
+		else if ((v[index] == 0)&&( u[index] > 0)){
+			angle = 90;
+		}
+		else if ((v[index] == 0)&&( u[index] < 0)){
+			angle = 270;
+		}
+		else if ((v[index] > 0)&&( u[index] == 0)){
+			angle = 0;
+		}
+		else if ((v[index] < 0)&&( u[index] == 0)){
+			angle = 180;
+		}
 		if(angle < 0){
 			angle = (360 - angle);
 		}
@@ -72,7 +95,7 @@ __global__ void bird_thread(float* resultantMatrix,float* resultantAngle,int* co
 	int i;
 
 	for(i = 0;i<TIMESTEPS;i++) {
-		tempAngle = resultantAngle[pos_row * XSIZE + pos_col];
+		tempAngle = resultantAngle[pos_row * LONG_SIZE + pos_col];
 		if((tempAngle >= 0) && (tempAngle < 45)) {
 			pos_row -= 1;
 		} 
@@ -121,22 +144,22 @@ int main()
 	cudaDeviceGetLimit(&limit,cudaLimitPrintfFifoSize);
 
 	float* udata;
-	//udata = (float*)malloc(YSIZE  * XSIZE * sizeof(float));
+	udata = (float*)malloc(LAT_SIZE  * LONG_SIZE * sizeof(float));
 	float* vdata;
-	//vdata = (float*)malloc(YSIZE  * XSIZE * sizeof(float));
+	vdata = (float*)malloc(LAT_SIZE  * LONG_SIZE * sizeof(float));
 	
 
 	FILE *udataTxt;
 	FILE *vdataTxt;
 	FILE *posdataTxt;
 
-	udataTxt = fopen("udata.txt","r");
+	udataTxt = fopen("uwind80.txt","r");
 	if(udataTxt == NULL) {
 		perror("Cannot open udataTxt file\n");
 		return -1;
 	}
 
-	vdataTxt =fopen("vdata.txt","r");
+	vdataTxt =fopen("vwind80.txt","r");
 	if(vdataTxt == NULL) {
 		perror("Cannot open vdataTxt file\n");
 		return -1;
@@ -149,36 +172,106 @@ int main()
 	}
 
 
-	udata =  get_inputData(udataTxt);
-	vdata =  get_inputData(vdataTxt);
+	//udata =  get_inputData(udataTxt);
+	//vdata =  get_inputData(vdataTxt);
 	
-	int j;
+	char line[LINESIZE];
+	memset(line,'\0',sizeof(line));
+
+	char tempVal[8];
+	memset(tempVal,'\0',sizeof(tempVal));
+
+	char* startPtr,*endPtr;
+
+	int i,j;
+	float Value;
 	
-	//for(j=0;j<YSIZE*XSIZE;j++) {
-	//	printf("%f,%f\n",udata[j],vdata[j]);
-	//}
+	i=0;
+	j=0;
+	
+	while(fgets(line,LINESIZE,udataTxt)!=NULL){
+		startPtr = line;
+		for(i=0;i<LAT_SIZE;i++){
+
+			Value = 0;
+			memset(tempVal,'\0',sizeof(tempVal));
+
+			if(i != (LAT_SIZE - 1)) {
+
+				endPtr = strchr(startPtr,' ');
+				strncpy(tempVal,startPtr,endPtr-startPtr);
+				Value = atof(tempVal);
+				udata[j * LAT_SIZE + i] = Value;
+				endPtr = endPtr + 1;
+				startPtr = endPtr;
+			}
+			else if(i == (LAT_SIZE - 1)){
+
+				strcpy(tempVal,startPtr);
+				Value = atof(tempVal);
+				udata[j * LAT_SIZE + i] = Value;
+			}			
+		}
+		j++;
+	}	
 
 
-	float resultantMatrix[XSIZE * YSIZE];
-	float resultantAngle[XSIZE * YSIZE];
+	memset(line,'\0',sizeof(line));
+	memset(tempVal,'\0',sizeof(tempVal));
+
+
 	
-	resultantMatrix[YSIZE * XSIZE -1] = 834.0;	
+	i=0;
+	j=0;
+	
+	while(fgets(line,LINESIZE,vdataTxt)!=NULL){
+		startPtr = line;
+		for(i=0;i<LAT_SIZE;i++){
+			Value = 0;
+			memset(tempVal,'\0',sizeof(tempVal));
+
+			if(i != (LAT_SIZE - 1)) {
+
+				endPtr = strchr(startPtr,' ');
+				strncpy(tempVal,startPtr,endPtr-startPtr);
+				Value = atof(tempVal);
+				vdata[j * LAT_SIZE + i] = Value;
+				endPtr = endPtr + 1;
+				startPtr = endPtr;
+			}
+			else if(i == (LAT_SIZE - 1)){
+
+				strcpy(tempVal,startPtr);
+				Value = atof(tempVal);
+				vdata[j * LAT_SIZE + i] = Value;
+			}			
+		}
+		j++;
+	}	
+
+
+	float resultantMatrix[LONG_SIZE * LAT_SIZE];
+	float resultantAngle[LONG_SIZE * LAT_SIZE];
+	
+	resultantMatrix[LAT_SIZE * LONG_SIZE -1] = 834.0;	
 
 	float *udataPtr,*vdataPtr,*resultantMatrixPtr,*resultantAnglePtr;
 
-	cudaMalloc((void**)&udataPtr,XSIZE * YSIZE * sizeof(float));
-	cudaMemcpy(udataPtr,udata,XSIZE * YSIZE * sizeof(float),cudaMemcpyHostToDevice);
+	cudaMalloc((void**)&udataPtr,LONG_SIZE * LAT_SIZE * sizeof(float));
+	cudaMemcpy(udataPtr,udata,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
 
-	cudaMalloc((void**)&vdataPtr,XSIZE * YSIZE * sizeof(float));
-	cudaMemcpy(vdataPtr,vdata,XSIZE * YSIZE * sizeof(float),cudaMemcpyHostToDevice);
+	cudaMalloc((void**)&vdataPtr,LONG_SIZE * LAT_SIZE * sizeof(float));
+	cudaMemcpy(vdataPtr,vdata,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
 
-	cudaMalloc((void**)&resultantMatrixPtr,XSIZE * YSIZE * sizeof(float));
-	cudaMalloc((void**)&resultantAnglePtr,XSIZE * YSIZE * sizeof(float));
+	cudaMalloc((void**)&resultantMatrixPtr,LONG_SIZE * LAT_SIZE * sizeof(float));
+	cudaMalloc((void**)&resultantAnglePtr,LONG_SIZE * LAT_SIZE * sizeof(float));
 	
-	cudaMemcpy(vdataPtr,vdata,XSIZE * YSIZE * sizeof(float),cudaMemcpyHostToDevice);
+	cudaMemcpy(vdataPtr,vdata,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
 
-	dim3 gridSize(1,YSIZE,1);
-	dim3 blockSize((XSIZE/32 +1)*32 ,1,1);
+	dim3 gridSize(1,LONG_SIZE,1);
+	dim3 blockSize((LAT_SIZE/32 +1)*32 ,1,1);
+
+
 	printf("Hello2\n");
 	get_resultant<<<gridSize,blockSize>>>(udataPtr,vdataPtr,resultantMatrixPtr,resultantAnglePtr);
 	printf("Hello3\n");
@@ -192,19 +285,18 @@ int main()
     	return 0;
   	}
 
-	cudaMemcpy(resultantMatrix,resultantMatrixPtr,YSIZE * XSIZE * sizeof(float),cudaMemcpyDeviceToHost);
-	cudaMemcpy(resultantAngle,resultantAnglePtr,YSIZE * XSIZE * sizeof(float),cudaMemcpyDeviceToHost);
+	cudaMemcpy(resultantMatrix,resultantMatrixPtr,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyDeviceToHost);
+	cudaMemcpy(resultantAngle,resultantAnglePtr,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyDeviceToHost);
 
 	cudaFree(udataPtr);
 	cudaFree(vdataPtr);
 	cudaFree(resultantMatrixPtr);
 	cudaFree(resultantAnglePtr);
 	
-
-	//for(i=0;i< XSIZE * YSIZE;i++) {
-	//	printf("%f\n",resultantAngle[i]);
-	//}
-
+	
+	for(j=0;j<LAT_SIZE*LONG_SIZE;j++) {
+		printf("%f,%f,%f\n",udata[j],vdata[j],resultantAngle[j]);
+	}
 
 
 	get_movementData(posdataTxt,resultantMatrix,resultantAngle);
@@ -215,11 +307,11 @@ int main()
 
 	cudaMalloc((void**)&coords_rowPtr,TIMESTEPS * sizeof(int));
 	cudaMalloc((void**)&coords_colPtr,TIMESTEPS * sizeof(int));
-	cudaMalloc((void**)&resultantMatrixPtr,XSIZE * YSIZE * sizeof(float));
-	cudaMalloc((void**)&resultantAnglePtr,XSIZE * YSIZE * sizeof(float));
+	cudaMalloc((void**)&resultantMatrixPtr,LONG_SIZE * LAT_SIZE * sizeof(float));
+	cudaMalloc((void**)&resultantAnglePtr,LONG_SIZE * LAT_SIZE * sizeof(float));
 
-	cudaMemcpy(resultantMatrixPtr,resultantMatrix,XSIZE * YSIZE * sizeof(float),cudaMemcpyHostToDevice);
-	cudaMemcpy(resultantAnglePtr,resultantAngle,XSIZE * YSIZE * sizeof(float),cudaMemcpyHostToDevice);
+	cudaMemcpy(resultantMatrixPtr,resultantMatrix,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
+	cudaMemcpy(resultantAnglePtr,resultantAngle,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
 
 	dim3 gridSize2(1,0,0);
 	dim3 blockSize2(1,0,0);
@@ -239,63 +331,17 @@ int main()
 
 	//free(udata);
 	//free(vdata);
+//------------------------------------------------------------------------------------------------------------------------------------
 	return 0;
 
 }
 
-float* get_inputData(FILE* dataTxt)
-{
-
-
-	static float data[YSIZE * XSIZE];
-
-	char line[LINESIZE];
-	memset(line,'\0',sizeof(line));
-
-	char tempVal[8];
-	memset(tempVal,'\0',sizeof(tempVal));
-
-	char* startPtr,*endPtr;
-
-	int i,j;
-	float Value;
-	
-	i=0;
-	j=0;
-	
-	while(fgets(line,LINESIZE,dataTxt)!=NULL){
-		startPtr = line;
-		for(i=0;i<XSIZE;i++){
-
-			Value = 0;
-			memset(tempVal,'\0',sizeof(tempVal));
-
-			if(i != (XSIZE - 1)) {
-
-				endPtr = strchr(startPtr,' ');
-				strncpy(tempVal,startPtr,endPtr-startPtr);
-				Value = atof(tempVal);
-				data[j * XSIZE + i] = Value;
-				endPtr = endPtr + 1;
-				startPtr = endPtr;
-			}
-			else if(i == (XSIZE - 1)){
-
-				strcpy(tempVal,startPtr);
-				Value = atof(tempVal);
-				data[j * XSIZE + i] = Value;
-			}			
-		}
-		j++;
-	}	
-	return data;
-}
 
 void get_movementData(FILE* outTxt,float* resultantMatrix,float* resultantAngle)
 {
 
 	int pos_row,pos_col;
-	pos_row = STARTING_ROW;
+	pos_row = LONG_SIZE - STARTING_ROW;
 	pos_col = STARTING_COL;
 	
 	float tempAngle = 0;
@@ -306,45 +352,45 @@ void get_movementData(FILE* outTxt,float* resultantMatrix,float* resultantAngle)
 
 	for(i = 0;i<TIMESTEPS;i++) {
 		
-		tempAngle = resultantAngle[pos_row * XSIZE + pos_col];
-		printf("%d,%d,%f\n",pos_row,pos_col,tempAngle);
+		tempAngle = resultantAngle[pos_row * LAT_SIZE + pos_col];
+		//printf("%d,%d,%f\n",pos_row,pos_col,tempAngle);
 		if((tempAngle >= 0) && (tempAngle < 45)) {
-			pos_row += 1;
+			pos_row -= 1;
 		} 
 		else if((tempAngle >= 45) && (tempAngle < 90)) {
-			pos_row += 1;
+			pos_row -= 1;
 			pos_col += 1;
 		}
 		else if((tempAngle >= 90) && (tempAngle < 135)) {
 			pos_col += 1;
 		}
 		else if((tempAngle >= 135) && (tempAngle < 180)) {
-			pos_row -= 1;
+			pos_row += 1;
 			pos_col += 1;
 		}
 		else if((tempAngle >= 180) && (tempAngle < 225)) {
-			pos_row -= 1;
+			pos_row += 1;
 		}
 		else if((tempAngle >= 225) && (tempAngle < 270)) {
-			pos_row -= 1;
+			pos_row += 1;
 			pos_col -= 1;
 		}
 		else if((tempAngle >= 270) && (tempAngle < 315)) {
 			pos_col -= 1;
 		}
 		else if((tempAngle >= 315) && (tempAngle < 360)) {
-			pos_row += 1;
+			pos_row -= 1;
 			pos_col -= 1;
 		}
 		
-		if(pos_row >= YSIZE) pos_row = YSIZE - 1;
-		else if(pos_row <= 0) pos_row = 1;
-		if(pos_col >= XSIZE) pos_col = XSIZE - 1;
-		else if(pos_col <= 0) pos_col = 1;
+		if(pos_row >= LONG_SIZE) pos_row = LONG_SIZE - 1;
+		else if(pos_row < 0) pos_row = 1;
+		if(pos_col >= LAT_SIZE) pos_col = LAT_SIZE - 1;
+		else if(pos_col < 0) pos_col = 1;
 			 
 		//coords_row[TIMESTEPS] = pos_row;
 		//coords_col[TIMESTEPS] = pos_col;
-		fprintf(outTxt,"%d,%d\n",55 - pos_row,pos_col);		
+		fprintf(outTxt,"%d,%d\n",95 - pos_row,pos_col);		
 	
 	}
 
