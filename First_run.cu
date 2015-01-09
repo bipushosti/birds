@@ -15,8 +15,8 @@
 #define SKIP_TIMESTEPS	23
 //#define DESIRED_ROW	
 //#define DESIRED_COL
-#define STARTING_ROW	5
-#define STARTING_COL	45
+#define STARTING_ROW	11
+#define STARTING_COL	14
 //What is the time limit? How long will the birds keep flying/migrating before they 
 //just give up?
 
@@ -31,6 +31,7 @@
 __global__ void get_resultant(float * u, float* v,float* resultantMatrix,float* resultantAngle);
 //void get_movementData(FILE* outTxt,float* resultantMatrix,float* resultantAngle,float* udata,float* vdata);
 void get_movementData(FILE* outTxt,float* udata,float* vdata);
+float bilinear_interpolation(float x,int x1,int x2,float y,int y1,int y2,float Q11,float Q12,float Q21,float Q22);
 //--------------------------------------------------------------------------------------------------------------------------
 
 //Kernel to get angle and magnitude from u and v matrices
@@ -380,11 +381,14 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata)
 	//pos_row = LONG_SIZE - STARTING_ROW;
 	pos_row = STARTING_ROW;
 	pos_col = STARTING_COL;
-	
+
+	fprintf(outTxt,"%d,%d\n",pos_row,pos_col);
 	//float tempAngle = 0;
 	int k;
-	long i;
-	
+	long i,j,l;
+	j=23;
+	l = 0;
+
 	//int coords_row[TIMESTEPS];
 	//int coords_col[TIMESTEPS];
 
@@ -394,16 +398,33 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata)
 	//for(i = SKIP_TIMESTEPS - 1; i<(TIMESTEPS - 1);i++) {
 
 	i = skip_size +pos_row * LAT_SIZE + pos_col;
+	//pos_row = pos_row + (int)udata[i];
+	//pos_col = pos_col + (int)vdata[i];	
+	//pos_row = floorf(pos_row);
+	//pos_col = floorf(pos_col);
+
+	//fprintf(outTxt,"%d,%d\n",pos_row,pos_col);
+	//printf("%f,%f,%ld\n",udata[i],vdata[i],j);
 	while( i <= (TIMESTEPS-1) * LAT_SIZE * LONG_SIZE ) {
-		for(k=0;k<6;k++,i++ ) {
+		for(k=0;k<6;k++,i++,j++,l++ ) {
 
 			//speedOrMagnitude = hypotf(udata[SKIP_TIMESTEPS * LONG_SIZE  * LAT_SIZE + LONG_SIZE * j + pos_row * LAT_SIZE + pos_col],
 					//	vdata[SKIP_TIMESTEPS * LONG_SIZE  * LAT_SIZE + LONG_SIZE * j + pos_row * LAT_SIZE + pos_col]);
-			pos_row = lroundf(pos_row + udata[i]);
-			pos_col = lroundf(pos_col + vdata[i]);
+			//pos_row = lroundf(pos_row + udata[i]);
+			//pos_col = lroundf(pos_col + vdata[i]);
 			
-			printf("%ld\n",i);
+			
+			
+			pos_row = pos_row + (int)(rintf(vdata[skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col] * 3.6/50));
+			pos_col = pos_col + (int)(rintf(udata[skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col] * 3.6/50));	
+
+//			pos_row = floorf(pos_row);
+//			pos_col = floorf(pos_col);
+			
+			
+			//printf("%ld\n",i);
 			fprintf(outTxt,"%d,%d\n",pos_row,pos_col); 
+			printf("%f,%f,%ld\n",udata[skip_size  + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col],vdata[skip_size  + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col],j);
 			//i = i + 1;
 			
 		}
@@ -411,11 +432,24 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata)
 		i = i-6;
 		//i = skip_size + LONG_SIZE * LAT_SIZE * j * 18 +pos_row * LAT_SIZE + pos_col;
 		i = i + 24 * LAT_SIZE * LONG_SIZE;
-		
+		j--;
+		j = j - 6;
+		j += 24;
+		l--;
+		l -= 6;
+		l += 24;
 	}
 	
 }
 
+/*
+float bilinear_interpolation(float x,int x1,int x2,float y,int y1,int y2,float Q11,float Q12,float Q21,float Q22) 
+{
+	float value = 0;
+	value = [(x2 - x1)[(y2 - y) * Q11 + (y - y1) * Q12] + (x - x1)[(y2 - y) * Q21 + (y - y1) * Q22]]/[(x2 - x1) * (y2 - y1)];
+	return value;
+}
+*/
 
 
 
