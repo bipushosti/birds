@@ -17,21 +17,21 @@
 //#define DESIRED_COL
 #define STARTING_ROW	11
 #define STARTING_COL	14
-//What is the time limit? How long will the birds keep flying/migrating before they 
-//just give up?
 
-//Assuming min tail wind speed = 1km/hr
-//Assuming best tail wind speed = 40km/hr
-//Assuming Max tail wind speed = 80km/hr
-//Assuming Max head wind speed = 30km/hr
+#define DESIREDANGLE	90
+#define DESIRED_SPEED	36	//In km/hr
 
+
+
+//Altitude = 850 millibars
+//Year = 1980
 
 //--------------------------------------------------------------------------------------------------------------------------
 
 __global__ void get_resultant(float * u, float* v,float* resultantMatrix,float* resultantAngle);
-//void get_movementData(FILE* outTxt,float* resultantMatrix,float* resultantAngle,float* udata,float* vdata);
 void get_movementData(FILE* outTxt,float* udata,float* vdata);
-float bilinear_interpolation(float x,int x1,int x2,float y,int y1,int y2,float Q11,float Q12,float Q21,float Q22);
+float getAngleValue(float u,float v);
+
 //--------------------------------------------------------------------------------------------------------------------------
 
 //Kernel to get angle and magnitude from u and v matrices
@@ -148,8 +148,8 @@ int main()
 	udata = (float*)malloc(LAT_SIZE  * LONG_SIZE * TIMESTEPS * sizeof(float));
 	float* vdata;
 	vdata = (float*)malloc(LAT_SIZE  * LONG_SIZE * TIMESTEPS * sizeof(float));
-	
-
+	float* dirData;
+	dirData = (float*)malloc(LAT_SIZE  * LONG_SIZE * sizeof(float));
 	
 
 	FILE *posdataTxt;
@@ -172,6 +172,12 @@ int main()
 		return -1;
 	}
 
+	FILE* dirTxt;
+	dirTxt = fopen("direction.txt","r");
+	if(dirTxt == NULL) {
+		perror("Cannot open dirTxt file\n");
+		return -1;
+	}
 
 	FILE* inpCheckU;
 	inpCheckU = fopen("inpCheckU.txt","w");
@@ -186,9 +192,6 @@ int main()
 		perror("Cannot open udataTxt file\n");
 		return -1;
 	}
-
-	//udata =  get_inputData(udataTxt);
-	//vdata =  get_inputData(vdataTxt);
 	
 	char line[LINESIZE];
 	memset(line,'\0',sizeof(line));
@@ -236,8 +239,6 @@ int main()
 
 	memset(line,'\0',sizeof(line));
 	memset(tempVal,'\0',sizeof(tempVal));
-
-
 	
 	i=0;
 	j=0;
@@ -268,7 +269,42 @@ int main()
 		}
 		j++;
 	}
-		
+	
+
+	memset(line,'\0',sizeof(line));
+	memset(tempVal,'\0',sizeof(tempVal));
+	
+	i=0;
+	j=0;
+
+	while(fgets(line,LINESIZE,dirTxt)!=NULL){
+		startPtr = line;
+		for(i=0;i<LAT_SIZE;i++){
+			Value = 0;
+			memset(tempVal,'\0',sizeof(tempVal));
+
+			if(i != (LAT_SIZE - 1)) {
+
+				endPtr = strchr(startPtr,',');
+				strncpy(tempVal,startPtr,endPtr-startPtr);
+				Value = atof(tempVal);
+				dirData[j * LAT_SIZE + i] = Value;
+				endPtr = endPtr + 1;
+				startPtr = endPtr;
+			
+			}
+			else if(i == (LAT_SIZE - 1)){
+
+				strcpy(tempVal,startPtr);
+				Value = atof(tempVal);
+				dirData[j * LAT_SIZE + i] = Value;
+			
+			}	
+			printf("%f\n",dirData[j * LAT_SIZE + i]);		
+		}
+		j++;
+	}
+
 	for(j=0;j<LONG_SIZE * TIMESTEPS;j++) {
 		for(i=0;i<LAT_SIZE;i++) {
 			if(i == LAT_SIZE -1) {
@@ -366,11 +402,65 @@ int main()
 
 	free(udata);
 	free(vdata);
+	free(dirData);
+
+	fclose(udataTxt);
+	fclose(vdataTxt);
+	fclose(inpCheckU);
+	fclose(inpCheckV);
+	fclose(posdataTxt);
 //------------------------------------------------------------------------------------------------------------------------------------
 	return 0;
 
 }
 
+
+float getAngleValue(float u,float v)
+{
+
+		float angle,diffAngle;
+
+		if((v >0)&&( u >0)) {
+			angle = tanf(u/v) * (180/PI);
+			diffAngle = DESIREDANGLE - angle;
+		}
+		else if ((v > 0)&&( u < 0)){
+			angle = 360 - (tanf(u/v) * (180/PI));
+			diffAngle = DESIREDANGLE + (tanf(u/v) * (180/PI));
+		}
+		else if ((v < 0)&&( u > 0)){
+			angle = 180 - (tanf(u/v) * (180/PI));
+			diffAngle = DESIREDANGLE - (tanf(u/v) * (180/PI));
+		}
+		else if ((v < 0)&&( u < 0)){
+			angle = 180 + (tanf(u/v) * (180/PI));
+			diffAngle = DESIREDANGLE + (tanf(u/v) * (180/PI)) 
+		}
+		else if ((v == 0)&&( u > 0)){
+			angle = 90;
+			diffAngle = DESIREDANGLE - angle;
+		}
+		else if ((v == 0)&&( u < 0)){
+			angle = 270;
+			diffAngle = angle - DESIREDANGLE;
+		}
+		else if ((v > 0)&&( u == 0)){
+			angle = 0;
+			diffAngle = DESIREDANGLE + angle;
+		}
+		else if ((v < 0)&&( u == 0)){
+			angle = 180;
+			diffAngle = angle - DESIREDANGLE;
+		}
+
+		if(angle < 0) angle = (360 - angle);
+		if(angle > 360) angle = angle - 360;
+
+		if(diffAngle < 0) diffAngle = 360 - angle;
+		if(diffAngle > 360) diffAngle = diffAngle - 360;
+
+		return diffAngle;
+}
 
 //void get_movementData(FILE* outTxt,float* resultantMatrix,float* resultantAngle,float* udata,float* vdata)
 void get_movementData(FILE* outTxt,float* udata,float* vdata)
@@ -386,11 +476,9 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata)
 	//float tempAngle = 0;
 	int k;
 	long i,j,l;
-	j=23;
+	j=SKIP_TIMESTEPS;
 	l = 0;
 
-	//int coords_row[TIMESTEPS];
-	//int coords_col[TIMESTEPS];
 
 	float speedOrMagnitude;
 	
@@ -409,28 +497,21 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata)
 		for(k=0;k<6;k++,i++,j++,l++ ) {
 
 			//speedOrMagnitude = hypotf(udata[SKIP_TIMESTEPS * LONG_SIZE  * LAT_SIZE + LONG_SIZE * j + pos_row * LAT_SIZE + pos_col],
-					//	vdata[SKIP_TIMESTEPS * LONG_SIZE  * LAT_SIZE + LONG_SIZE * j + pos_row * LAT_SIZE + pos_col]);
-			//pos_row = lroundf(pos_row + udata[i]);
-			//pos_col = lroundf(pos_col + vdata[i]);
-			
-			
+					//	vdata[SKIP_TIMESTEPS * LONG_SIZE  * LAT_SIZE + LONG_SIZE * j + pos_row * LAT_SIZE + pos_col]);	
 			
 			pos_row = pos_row + (int)(rintf(vdata[skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col] * 3.6/50));
 			pos_col = pos_col + (int)(rintf(udata[skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col] * 3.6/50));	
 
-//			pos_row = floorf(pos_row);
-//			pos_col = floorf(pos_col);
 			
 			
 			//printf("%ld\n",i);
 			fprintf(outTxt,"%d,%d\n",pos_row,pos_col); 
-			printf("%f,%f,%ld\n",udata[skip_size  + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col],vdata[skip_size  + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col],j);
+			//printf("%f,%f,%ld\n",udata[skip_size  + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col],vdata[skip_size  + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col],j);
 			//i = i + 1;
 			
 		}
 		i--;
 		i = i-6;
-		//i = skip_size + LONG_SIZE * LAT_SIZE * j * 18 +pos_row * LAT_SIZE + pos_col;
 		i = i + 24 * LAT_SIZE * LONG_SIZE;
 		j--;
 		j = j - 6;
@@ -442,14 +523,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata)
 	
 }
 
-/*
-float bilinear_interpolation(float x,int x1,int x2,float y,int y1,int y2,float Q11,float Q12,float Q21,float Q22) 
-{
-	float value = 0;
-	value = [(x2 - x1)[(y2 - y) * Q11 + (y - y1) * Q12] + (x - x1)[(y2 - y) * Q21 + (y - y1) * Q22]]/[(x2 - x1) * (y2 - y1)];
-	return value;
-}
-*/
+
 
 
 
