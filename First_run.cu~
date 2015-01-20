@@ -15,75 +15,26 @@
 #define SKIP_TIMESTEPS	23
 //#define DESIRED_ROW	
 //#define DESIRED_COL
-#define STARTING_ROW	11
-#define STARTING_COL	14
+#define STARTING_ROW	20
+#define STARTING_COL	20
 
-#define DESIREDANGLE	90
-//What is the time limit? How long will the birds keep flying/migrating before they 
-//just give up?
+#define DESIREDANGLE	90	//In degrees
+#define DESIRED_SPEED	10	//In m/s
+#define MIN_PROFIT	-7
 
-//Assuming min tail wind speed = 1km/hr
-//Assuming best tail wind speed = 40km/hr
-//Assuming Max tail wind speed = 80km/hr
-//Assuming Max head wind speed = 30km/hr
 
 //Altitude = 850 millibars
 //Year = 1980
 
 //--------------------------------------------------------------------------------------------------------------------------
 
-__global__ void get_resultant(float * u, float* v,float* resultantMatrix,float* resultantAngle);
-void get_movementData(FILE* outTxt,float* udata,float* vdata);
-float getAngleValue(float u,float v);
+void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData);
+float getAngleValue(float* udata,float* vdata,float* dirData,long index,long pos);
 
 //--------------------------------------------------------------------------------------------------------------------------
 
 //Kernel to get angle and magnitude from u and v matrices
-__global__ void get_resultant(float * u, float* v,float* resultantMatrix,float* resultantAngle)
-{
-	float angle;
 
-	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-	int index = x + y * LAT_SIZE; 
-
-	if(x < LONG_SIZE) {
-		resultantMatrix[index] = hypotf(u[index],v[index]);
-		if((v[index] >0)&&( u[index] >0)) {
-			angle = atanf(u[index]/v[index]) * (180/PI);
-		}
-		else if ((v[index] > 0)&&( u[index] < 0)){
-			angle = 360 - atanf(u[index]/v[index]) * (180/PI);
-		}
-		else if ((v[index] < 0)&&( u[index] > 0)){
-			angle = 180 - atanf(u[index]/v[index]) * (180/PI);
-		}
-		else if ((v[index] < 0)&&( u[index] < 0)){
-			angle = 180 + atanf(u[index]/v[index]) * (180/PI);
-		}
-		else if ((v[index] == 0)&&( u[index] > 0)){
-			angle = 90;
-		}
-		else if ((v[index] == 0)&&( u[index] < 0)){
-			angle = 270;
-		}
-		else if ((v[index] > 0)&&( u[index] == 0)){
-			angle = 0;
-		}
-		else if ((v[index] < 0)&&( u[index] == 0)){
-			angle = 180;
-		}
-		if(angle < 0){
-			angle = (360 - angle);
-		}
-		if(angle > 360) {
-			angle = angle - 360;
-		}
-		resultantAngle[index] = angle;
-		//printf("%f,%f\n",resultantMatrix[index],angle);
-	}	
-
-}
 
 /*
 //Computation Kernel
@@ -148,6 +99,8 @@ int main()
 	cudaDeviceSetLimit(cudaLimitMallocHeapSize, 128*1024*1024);
 	cudaDeviceGetLimit(&limit,cudaLimitPrintfFifoSize);
 
+
+	//The wind data is in m/s
 	float* udata;
 	udata = (float*)malloc(LAT_SIZE  * LONG_SIZE * TIMESTEPS * sizeof(float));
 	float* vdata;
@@ -304,24 +257,27 @@ int main()
 				dirData[j * LAT_SIZE + i] = Value;
 			
 			}	
-			printf("%f\n",dirData[j * LAT_SIZE + i]);		
 		}
 		j++;
 	}
-
-	for(j=0;j<LONG_SIZE * TIMESTEPS;j++) {
+/*
+	//for(j=0;j<LONG_SIZE * TIMESTEPS;j++) {
+	for(j=0;j<LONG_SIZE;j++) {
 		for(i=0;i<LAT_SIZE;i++) {
 			if(i == LAT_SIZE -1) {
-				fprintf(inpCheckU,"%f\n",udata[j * LAT_SIZE + i]);
-				fprintf(inpCheckV,"%f\n",vdata[j * LAT_SIZE + i]);
+				//fprintf(inpCheckU,"%f\n",udata[j * LAT_SIZE + i]);
+				//fprintf(inpCheckV,"%f\n",vdata[j * LAT_SIZE + i]);
+				printf("%f\n",dirData[j * LAT_SIZE + i]);
 			}
 			else {
-				fprintf(inpCheckU,"%f ",udata[j * LAT_SIZE + i]);
-				fprintf(inpCheckV,"%f ",vdata[j * LAT_SIZE + i]);
+				
+				//fprintf(inpCheckU,"%f ",udata[j * LAT_SIZE + i]);
+				//fprintf(inpCheckV,"%f ",vdata[j * LAT_SIZE + i]);
 			}
 		}
 	}
-	get_movementData(posdataTxt,udata,vdata);
+*/
+	get_movementData(posdataTxt,udata,vdata,dirData);
 /*
 	float resultantMatrix[LONG_SIZE * LAT_SIZE];
 	float resultantAngle[LONG_SIZE * LAT_SIZE];
@@ -419,42 +375,53 @@ int main()
 }
 
 
-float getAngleValue(float u,float v)
+float getAngleValue(float* udata,float* vdata,float* dirData,long index,long pos)
 {
 
-		float angle,diffAngle;
+
+		float u,v;
+		
+		//All wind data in m/s
+		v = vdata[index];
+		u = udata[index];
+		
+		
+		float angle,diffAngle,magnitude,magnitude_squared,wind_profit;
+
+		magnitude_squared = u * u + v * v;
+		magnitude = (float)sqrt(magnitude_squared);
 
 		if((v >0)&&( u >0)) {
 			angle = tanf(u/v) * (180/PI);
-			diffAngle = DESIREDANGLE - angle;
+			diffAngle = dirData[pos] - angle;
 		}
 		else if ((v > 0)&&( u < 0)){
 			angle = 360 - (tanf(u/v) * (180/PI));
-			diffAngle = DESIREDANGLE + (tanf(u/v) * (180/PI));
+			diffAngle = dirData[pos] + (tanf(u/v) * (180/PI));
 		}
 		else if ((v < 0)&&( u > 0)){
 			angle = 180 - (tanf(u/v) * (180/PI));
-			diffAngle = DESIREDANGLE - (tanf(u/v) * (180/PI));
+			diffAngle = dirData[pos]- (tanf(u/v) * (180/PI));
 		}
 		else if ((v < 0)&&( u < 0)){
 			angle = 180 + (tanf(u/v) * (180/PI));
-			diffAngle = DESIREDANGLE + (tanf(u/v) * (180/PI)) 
+			diffAngle = dirData[pos] + (tanf(u/v) * (180/PI)); 
 		}
 		else if ((v == 0)&&( u > 0)){
 			angle = 90;
-			diffAngle = DESIREDANGLE - angle;
+			diffAngle = dirData[pos] - angle;
 		}
 		else if ((v == 0)&&( u < 0)){
 			angle = 270;
-			diffAngle = angle - DESIREDANGLE;
+			diffAngle = angle - dirData[pos];
 		}
 		else if ((v > 0)&&( u == 0)){
 			angle = 0;
-			diffAngle = DESIREDANGLE + angle;
+			diffAngle = dirData[pos] + angle;
 		}
 		else if ((v < 0)&&( u == 0)){
 			angle = 180;
-			diffAngle = angle - DESIREDANGLE;
+			diffAngle = angle - dirData[pos];
 		}
 
 		if(angle < 0) angle = (360 - angle);
@@ -463,11 +430,15 @@ float getAngleValue(float u,float v)
 		if(diffAngle < 0) diffAngle = 360 - angle;
 		if(diffAngle > 360) diffAngle = diffAngle - 360;
 
-		return diffAngle;
+
+		wind_profit = (DESIRED_SPEED * DESIRED_SPEED) + magnitude_squared - 2 * DESIRED_SPEED * magnitude * cos(diffAngle * PI/180);
+		wind_profit = DESIRED_SPEED - (float)sqrt(wind_profit);
+		//printf("%f\n",wind_profit);
+		return wind_profit;
 }
 
-//void get_movementData(FILE* outTxt,float* resultantMatrix,float* resultantAngle,float* udata,float* vdata)
-void get_movementData(FILE* outTxt,float* udata,float* vdata)
+
+void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData)
 {
 
 	
@@ -477,52 +448,82 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata)
 	pos_col = STARTING_COL;
 
 	fprintf(outTxt,"%d,%d\n",pos_row,pos_col);
-	//float tempAngle = 0;
+
 	int k;
-	long i,j,l;
-	j=SKIP_TIMESTEPS;
+	long i,l;
 	l = 0;
 
-
-	float speedOrMagnitude;
+	float profit_value,dirAngle;
+	float dir_v,dir_u;
 	
-	long skip_size = (SKIP_TIMESTEPS) * LONG_SIZE  * LAT_SIZE - 1;
-	//for(i = SKIP_TIMESTEPS - 1; i<(TIMESTEPS - 1);i++) {
+	long skip_size = (SKIP_TIMESTEPS * LONG_SIZE  * LAT_SIZE) - 1;
+	//skip_size = 120174
+
 
 	i = skip_size +pos_row * LAT_SIZE + pos_col;
-	//pos_row = pos_row + (int)udata[i];
-	//pos_col = pos_col + (int)vdata[i];	
-	//pos_row = floorf(pos_row);
-	//pos_col = floorf(pos_col);
 
-	//fprintf(outTxt,"%d,%d\n",pos_row,pos_col);
-	//printf("%f,%f,%ld\n",udata[i],vdata[i],j);
+
 	while( i <= (TIMESTEPS-1) * LAT_SIZE * LONG_SIZE ) {
-		for(k=0;k<6;k++,i++,j++,l++ ) {
+		dir_v = 0;
+		dir_u = 0;
+		dirAngle = 0;
 
-			//speedOrMagnitude = hypotf(udata[SKIP_TIMESTEPS * LONG_SIZE  * LAT_SIZE + LONG_SIZE * j + pos_row * LAT_SIZE + pos_col],
-					//	vdata[SKIP_TIMESTEPS * LONG_SIZE  * LAT_SIZE + LONG_SIZE * j + pos_row * LAT_SIZE + pos_col]);	
-			
-			pos_row = pos_row + (int)(rintf(vdata[skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col] * 3.6/50));
-			pos_col = pos_col + (int)(rintf(udata[skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col] * 3.6/50));	
+		for(k=0;k<6;k++,l++ ) {
+			i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;	
+			profit_value = getAngleValue(udata,vdata,dirData,i,pos_row * LAT_SIZE + pos_col);
 
-			
-			
-			//printf("%ld\n",i);
-			fprintf(outTxt,"%d,%d\n",pos_row,pos_col); 
-			//printf("%f,%f,%ld\n",udata[skip_size  + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col],vdata[skip_size  + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col],j);
-			//i = i + 1;
-			
+			if (profit_value >= MIN_PROFIT ) { 
+				//printf("Found value %f\n",profit_value);
+				
+				dirAngle = dirData[pos_row * LAT_SIZE + pos_col];
+				
+
+				//The grid is upside down; v increases from top to bottom while
+				//u increases from left to right
+				if(dirAngle <= 90){
+					dirAngle = 90 - dirAngle;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
+				}
+				else if((dirAngle > 90) && (dirAngle <= 180)){ 
+					dirAngle -= 90;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
+				}
+				else if((dirAngle > 180) && (dirAngle <= 270)) {
+			 		dirAngle = 270 - dirAngle;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
+				}
+				else if((dirAngle > 270) && (dirAngle <= 360)){
+					dirAngle -= 270;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
+				}
+				
+				pos_row = (int)(rintf(pos_row + vdata[i] + dir_v));
+				pos_col = (int)(rintf(pos_col + udata[i] + dir_u));	
+				//printf("%d,%d\n",pos_row,pos_col);
+				printf("\nDesired Angle::%f,dir_v::%f,dir_u::%f\n",dirAngle,dir_v,dir_u);
+
+				//printf("%ld\n",i);
+				printf("%ld \t %ld \t %d \t %f \t %d \t %d \t (%f,%f)\n",i,l,k,profit_value,pos_row,pos_col,vdata[i],udata[i]);
+				//fprintf(outTxt,"%d,%d\n",pos_row,pos_col); 
+			}
+			else { 
+				//i = i - k + 6;				
+				l = l - k + 6;
+				//printf("Skipped Wind (%f,%f) @ (%d,%d)\n",udata[i],vdata[i],pos_row,pos_col);
+				break; 
+			}
 		}
-		i--;
-		i = i-6;
-		i = i + 24 * LAT_SIZE * LONG_SIZE;
-		j--;
-		j = j - 6;
-		j += 24;
-		l--;
 		l -= 6;
-		l += 24;
+
+		if (l == 0) l += 23;
+		else l += 24;
+
+		i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
+
 	}
 	
 }
