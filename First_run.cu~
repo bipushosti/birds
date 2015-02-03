@@ -23,74 +23,27 @@
 #define MIN_PROFIT	-7
 
 
-//Altitude = 850 millibars
-//Year = 1980
 
-//--------------------------------------------------------------------------------------------------------------------------
+// Barometric pressure
+// Bird finds the pressure at the time it leaves and compares it with the data from
+// the previous day.
 
-void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData);
-float getAngleValue(float* udata,float* vdata,float* dirData,long index,long pos);
-
-//--------------------------------------------------------------------------------------------------------------------------
-
-//Kernel to get angle and magnitude from u and v matrices
-
-
+//------------------------------Notes---------------------------------------------------------------------------------------
 /*
-//Computation Kernel
-__global__ void bird_thread(float* resultantMatrix,float* resultantAngle,int* coords_row,int* coords_col)
-{
-	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-	int y = (blockIdx.y * blockDim.y) + threadIdx.y;	
 
-	int pos_row,pos_col;
-	pos_row = 90;
-	pos_col = 25;
-	
-	float tempAngle = 0;
-	int i;
+Altitude = 850 millibars
+Year = 1980
 
-	for(i = 0;i<TIMESTEPS;i++) {
-		tempAngle = resultantAngle[pos_row * LONG_SIZE + pos_col];
-		if((tempAngle >= 0) && (tempAngle < 45)) {
-			pos_row -= 1;
-		} 
-		else if((tempAngle >= 45) && (tempAngle < 90)) {
-			pos_row -= 1;
-			pos_col += 1;
-		}
-		else if((tempAngle >= 90) && (tempAngle < 135)) {
-			pos_col += 1;
-		}
-		else if((tempAngle >= 135) && (tempAngle < 180)) {
-			pos_row += 1;
-			pos_col += 1;
-		}
-		else if((tempAngle >= 180) && (tempAngle < 225)) {
-			pos_row += 1;
-		}
-		else if((tempAngle >= 225) && (tempAngle < 270)) {
-			pos_row += 1;
-			pos_col -= 1;
-		}
-		else if((tempAngle >= 270) && (tempAngle < 315)) {
-			pos_col -= 1;
-		}
-		else if((tempAngle >= 315) && (tempAngle < 360)) {
-			pos_row -= 1;
-			pos_col -= 1;
-		}
-		
-		coords_row[TIMESTEPS] = pos_row;
-		coords_col[TIMESTEPS] = pos_col;
-		printf("%d,%d\n",pos_row,pos_col);		
-	
-	}
-}
+22 Jan 2015	No upper limit to the bird flight speed currently; Birds can fly well above 10m/s
+
 */
+//--------------------------------------------------------------------------------------------------------------------------
 
+void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData,float* precipData,float* pressureData);
+float getProfitValue(float* udata,float* vdata,float* dirData,long index,long pos);
 
 //--------------------------------------------------------------------------------------------------------------------------
+
 int main()
 {
 
@@ -105,8 +58,15 @@ int main()
 	udata = (float*)malloc(LAT_SIZE  * LONG_SIZE * TIMESTEPS * sizeof(float));
 	float* vdata;
 	vdata = (float*)malloc(LAT_SIZE  * LONG_SIZE * TIMESTEPS * sizeof(float));
+
+	float* precipData;
+	precipData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
+	float* pressureData;
+	pressureData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
+
 	float* dirData;
 	dirData = (float*)malloc(LAT_SIZE  * LONG_SIZE * sizeof(float));
+	
 	
 
 	FILE *posdataTxt;
@@ -133,6 +93,20 @@ int main()
 	dirTxt = fopen("direction.txt","r");
 	if(dirTxt == NULL) {
 		perror("Cannot open dirTxt file\n");
+		return -1;
+	}
+
+	FILE* precipTxt;
+	precipTxt = fopen("precip.txt","r");
+	if(precipTxt == NULL) {
+		perror("Cannot open precipTxt file\n");
+		return -1;
+	}
+	
+	FILE* pressureTxt;
+	pressureTxt = fopen("pressure.txt","r");
+	if(pressureTxt == NULL) {
+		perror("Cannot open pressureTxt file\n");
 		return -1;
 	}
 
@@ -194,6 +168,7 @@ int main()
 
 	
 
+	
 	memset(line,'\0',sizeof(line));
 	memset(tempVal,'\0',sizeof(tempVal));
 	
@@ -226,8 +201,75 @@ int main()
 		}
 		j++;
 	}
-	
 
+	memset(line,'\0',sizeof(line));
+	memset(tempVal,'\0',sizeof(tempVal));
+	
+	i=0;
+	j=0;
+	
+	while(fgets(line,LINESIZE,precipTxt)!=NULL){
+		startPtr = line;
+		for(i=0;i<LAT_SIZE;i++){
+			Value = 0;
+			memset(tempVal,'\0',sizeof(tempVal));
+
+			if(i != (LAT_SIZE - 1)) {
+
+				endPtr = strchr(startPtr,',');
+				strncpy(tempVal,startPtr,endPtr-startPtr);
+				Value = atof(tempVal);
+				precipData[j * LAT_SIZE + i] = Value;
+				endPtr = endPtr + 1;
+				startPtr = endPtr;
+				
+			}
+			else if(i == (LAT_SIZE - 1)){
+
+				strcpy(tempVal,startPtr);
+				Value = atof(tempVal);
+				precipData[j * LAT_SIZE + i] = Value;
+				
+			}			
+		}
+		j++;
+	}
+
+
+	memset(line,'\0',sizeof(line));
+	memset(tempVal,'\0',sizeof(tempVal));
+	
+	i=0;
+	j=0;
+
+	while(fgets(line,LINESIZE,pressureTxt)!=NULL){
+		startPtr = line;
+		for(i=0;i<LAT_SIZE;i++){
+			Value = 0;
+			memset(tempVal,'\0',sizeof(tempVal));
+
+			if(i != (LAT_SIZE - 1)) {
+
+				endPtr = strchr(startPtr,',');
+				strncpy(tempVal,startPtr,endPtr-startPtr);
+				Value = atof(tempVal);
+				pressureData[j * LAT_SIZE + i] = Value;
+				endPtr = endPtr + 1;
+				startPtr = endPtr;
+			
+			}
+			else if(i == (LAT_SIZE - 1)){
+
+				strcpy(tempVal,startPtr);
+				Value = atof(tempVal);
+				pressureData[j * LAT_SIZE + i] = Value;
+			
+			}	
+		}
+		j++;
+	}
+
+	
 	memset(line,'\0',sizeof(line));
 	memset(tempVal,'\0',sizeof(tempVal));
 	
@@ -260,6 +302,10 @@ int main()
 		}
 		j++;
 	}
+
+
+
+	
 /*
 	//for(j=0;j<LONG_SIZE * TIMESTEPS;j++) {
 	for(j=0;j<LONG_SIZE;j++) {
@@ -277,7 +323,7 @@ int main()
 		}
 	}
 */
-	get_movementData(posdataTxt,udata,vdata,dirData);
+	get_movementData(posdataTxt,udata,vdata,dirData,precipData,pressureData);
 /*
 	float resultantMatrix[LONG_SIZE * LAT_SIZE];
 	float resultantAngle[LONG_SIZE * LAT_SIZE];
@@ -363,19 +409,24 @@ int main()
 	free(udata);
 	free(vdata);
 	free(dirData);
+	free(precipData);
+	free(pressureData);
 
 	fclose(udataTxt);
 	fclose(vdataTxt);
 	fclose(inpCheckU);
 	fclose(inpCheckV);
 	fclose(posdataTxt);
+	fclose(precipTxt);
+	fclose(dirTxt);
+	fclose(pressureTxt);
 //------------------------------------------------------------------------------------------------------------------------------------
 	return 0;
 
 }
 
 
-float getAngleValue(float* udata,float* vdata,float* dirData,long index,long pos)
+float getProfitValue(float* udata,float* vdata,float* dirData,long index,long pos)
 {
 
 
@@ -437,8 +488,8 @@ float getAngleValue(float* udata,float* vdata,float* dirData,long index,long pos
 		return wind_profit;
 }
 
-
-void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData)
+//Main part of the function
+void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, float* precipData,float* pressureData)
 {
 
 	
@@ -450,11 +501,16 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData)
 	fprintf(outTxt,"%d,%d\n",pos_row,pos_col);
 
 	int k;
-	long i,l;
+	long i,l,i_old,l_old;
 	l = 0;
+	l_old = 0;
+	i_old = 0;
 
-	float profit_value,dirAngle;
-	float dir_v,dir_u;
+	float profit_value,dirAngle,tailComponent,crossComponent;
+
+	//vectAngle = angle between the wind vector and the vector orthogonal to the
+	//direction vector; or the crosswind vector
+	float dir_v,dir_u,vectAngle;
 	
 	long skip_size = (SKIP_TIMESTEPS * LONG_SIZE  * LAT_SIZE) - 1;
 	//skip_size = 120174
@@ -470,45 +526,73 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData)
 
 		for(k=0;k<6;k++,l++ ) {
 			i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;	
-			profit_value = getAngleValue(udata,vdata,dirData,i,pos_row * LAT_SIZE + pos_col);
+			
+			
+			dirAngle = dirData[pos_row * LAT_SIZE + pos_col];				
 
-			if (profit_value >= MIN_PROFIT ) { 
+			//The grid is upside down; v increases from top to bottom while
+			//u increases from left to right
+			if(dirAngle <= 90){
+				dirAngle = 90 - dirAngle;
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
+			}
+			else if((dirAngle > 90) && (dirAngle <= 180)){ 
+				dirAngle -= 90;
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
+			}
+			else if((dirAngle > 180) && (dirAngle <= 270)) {
+		 		dirAngle = 270 - dirAngle;
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
+			}
+			else if((dirAngle > 270) && (dirAngle <= 360)){
+				dirAngle -= 270;
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
+			}
+			
+			//Getting the tail component of the wind; or the component of the
+			//wind in the desired direction of flight
+			tailComponent = (dir_v * vdata[i] + dir_u * udata[i]);
+			tailComponent = tailComponent/sqrt(udata[i]*udata[i] + vdata[i]*vdata[i]);
+
+
+			//Separate profit value methods have to be used if the tail component is less that equal to
+			//or greater than the desired speed of the birds
+			if(tailComponent <= DESIRED_SPEED) {
+				profit_value = getProfitValue(udata,vdata,dirData,i,pos_row * LAT_SIZE + pos_col);
+			}
+			else {
+				vectAngle = (dir_v * vdata[i] + dir_u * udata[i]);
+				vectAngle = acos(vectAngle / sqrt((udata[i]*udata[i] + vdata[i]* vdata[i])*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);	
+				vectAngle = (vectAngle <= 90)? 90 - vectAngle: vectAngle - 90;
+			
+				crossComponent = sqrt(udata[i]*udata[i] + vdata[i]*vdata[i])/cos(vectAngle);
+
+				//Getting the absolute value
+				crossComponent = (crossComponent<0)? crossComponent * (-1):crossComponent;
+				profit_value = tailComponent - crossComponent; 
+
+				printf("Over the Desired Speed\n");
+			}
+
+			//if ((profit_value >= MIN_PROFIT) ) { 
+			//Adding precip value 
+			if ((profit_value >= MIN_PROFIT) && (precipData[i] < 2) ) { 
 				//printf("Found value %f\n",profit_value);
-				
-				dirAngle = dirData[pos_row * LAT_SIZE + pos_col];
-				
-
-				//The grid is upside down; v increases from top to bottom while
-				//u increases from left to right
-				if(dirAngle <= 90){
-					dirAngle = 90 - dirAngle;
-					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
-					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
-				}
-				else if((dirAngle > 90) && (dirAngle <= 180)){ 
-					dirAngle -= 90;
-					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
-					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
-				}
-				else if((dirAngle > 180) && (dirAngle <= 270)) {
-			 		dirAngle = 270 - dirAngle;
-					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
-					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
-				}
-				else if((dirAngle > 270) && (dirAngle <= 360)){
-					dirAngle -= 270;
-					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
-					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
-				}
-				
 				pos_row = (int)(rintf(pos_row + vdata[i] + dir_v));
 				pos_col = (int)(rintf(pos_col + udata[i] + dir_u));	
 				//printf("%d,%d\n",pos_row,pos_col);
-				printf("\nDesired Angle::%f,dir_v::%f,dir_u::%f\n",dirAngle,dir_v,dir_u);
+				float tmp;
+				tmp = sqrt((vdata[i]+dir_v)*(vdata[i]+dir_v) + (udata[i]+dir_u)*(udata[i]+dir_u));
+				printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
 
 				//printf("%ld\n",i);
-				printf("%ld \t %ld \t %d \t %f \t %d \t %d \t (%f,%f)\n",i,l,k,profit_value,pos_row,pos_col,vdata[i],udata[i]);
+				//printf("%ld \t %ld \t %d \t %f \t %d \t %d \t (%f,%f)\n",i,l,k,profit_value,pos_row,pos_col,vdata[i],udata[i]);
 				//fprintf(outTxt,"%d,%d\n",pos_row,pos_col); 
+				
 			}
 			else { 
 				//i = i - k + 6;				
@@ -517,12 +601,19 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData)
 				break; 
 			}
 		}
+		//Goes back to the original starting hour for the bird; i.e 6pm
 		l -= 6;
+		
 
-		if (l == 0) l += 23;
-		else l += 24;
-
+		i_old = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
+		l += 23;
 		i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
+		
+			
+		
+		
+			
+		
 
 	}
 	
