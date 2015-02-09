@@ -522,7 +522,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 	int k;
 	long i,l,l_old;
 	//long i_old;
-	float pressure_sum,pressure_MultSum,slope;
+	float pressure_sum,pressure_MultSum,last_pressure,slope;
 	pressure_MultSum = 0;
 	pressure_sum = 0;
 	slope = 0;
@@ -548,6 +548,9 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		dir_u = 0;
 		dirAngle = 0;
 		l_old = 0;
+		slope = 0;
+		pressure_sum = 0;
+		pressure_MultSum = 0;
 		printf("At timestep Check\n");
 
 //If current pressure is greater than pressure in the previous day
@@ -612,10 +615,10 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 					//printf("%d,%d\n",pos_row,pos_col);
 					float tmp;
 					tmp = sqrt((vdata[i]+dir_v)*(vdata[i]+dir_v) + (udata[i]+dir_u)*(udata[i]+dir_u));
-					printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
+					//printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
 
 					//printf("%ld\n",i);
-					printf("%ld \t %ld \t %d \t %f \t %f \t %d \t %d \t (%f,%f)\n",i,l,k,precipData[i],profit_value,pos_row,pos_col,vdata[i],udata[i]);
+					//printf("%ld \t %ld \t %d \t %f \t %f \t %d \t %d \t (%f,%f)\n",i,l,k,precipData[i],profit_value,pos_row,pos_col,vdata[i],udata[i]);
 					//fprintf(outTxt,"%d,%d\n",pos_row,pos_col); 
 				
 				}
@@ -641,12 +644,30 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 			}
 
 
-			for(k=0; l_old<=(l_old+REGRESSION_HRS) && (k<=REGRESSION_HRS); l_old++,k++){
+			for(k=1; l_old<=(l_old+REGRESSION_HRS) && (k<=REGRESSION_HRS); l_old++,k++){
 				pressure_sum += pressureData[skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col];
 				pressure_MultSum += k * pressureData[skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col];
+				printf("%f\n",pressureData[skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col]);
+				
+				if(k == REGRESSION_HRS) {
+					last_pressure = pressureData[skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col];
+				}
 			}
 			
 			slope = ((REGRESSION_HRS * pressure_MultSum) - (pressure_sum * HRS_SUM))/(DENOM_SLOPE);
+
+			if(slope <= -1){
+				if(last_pressure < 1009) {
+					printf("Storm!!\n");
+				}
+				else if( (last_pressure >= 1009) && (last_pressure < 1020) ){
+					printf("Precipitation is very likely````` \n");
+				}
+				else if(last_pressure >1020) {
+					printf("Cloudy & Warm\n");
+				}
+			}
+			
 			printf("\t Slope is:: %f\n",slope);
 			//old_pressure = pressureData[i_old];
 			l += 24;
