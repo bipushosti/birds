@@ -9,7 +9,7 @@
 
 #define LONG_SIZE		95
 #define LAT_SIZE		55
-#define LINESIZE	8*LAT_SIZE+LAT_SIZE - 3
+#define LINESIZE	15*LAT_SIZE+LAT_SIZE - 3
 
 #define TIMESTEPS	720
 #define SKIP_TIMESTEPS	23
@@ -21,6 +21,16 @@
 #define DESIREDANGLE	90	//In degrees
 #define DESIRED_SPEED	10	//In m/s
 #define MIN_PROFIT	-7
+
+
+//Defining the x-variable size, it's sum and
+//sum of squares as needed for slope calculation
+#define REGRESSION_HRS	12
+#define HRS_SUM		78
+#define HRS_SQUARE_SUM	650
+#define DENOM_SLOPE	(REGRESSION_HRS * HRS_SQUARE_SUM)-(HRS_SUM * HRS_SUM)
+
+
 
 
 
@@ -35,6 +45,8 @@ Altitude = 850 millibars
 Year = 1980
 
 22 Jan 2015	No upper limit to the bird flight speed currently; Birds can fly well above 10m/s
+
+Precipitation = millimeters
 
 */
 //--------------------------------------------------------------------------------------------------------------------------
@@ -113,21 +125,21 @@ int main()
 	FILE* inpCheckU;
 	inpCheckU = fopen("inpCheckU.txt","w");
 	if(inpCheckU == NULL) {
-		perror("Cannot open udataTxt file\n");
+		perror("Cannot open inpCheckU file\n");
 		return -1;
 	}
 	
 	FILE* inpCheckV;
 	inpCheckV = fopen("inpCheckV.txt","w");
 	if(inpCheckV == NULL) {
-		perror("Cannot open udataTxt file\n");
+		perror("Cannot open inpCheckV file\n");
 		return -1;
 	}
 	
 	char line[LINESIZE];
 	memset(line,'\0',sizeof(line));
 
-	char tempVal[8];
+	char tempVal[15];
 	memset(tempVal,'\0',sizeof(tempVal));
 
 	char* startPtr,*endPtr;
@@ -202,6 +214,8 @@ int main()
 		j++;
 	}
 
+
+
 	memset(line,'\0',sizeof(line));
 	memset(tempVal,'\0',sizeof(tempVal));
 	
@@ -235,6 +249,9 @@ int main()
 		j++;
 	}
 
+
+
+	
 
 	memset(line,'\0',sizeof(line));
 	memset(tempVal,'\0',sizeof(tempVal));
@@ -421,6 +438,8 @@ int main()
 	fclose(dirTxt);
 	fclose(pressureTxt);
 //------------------------------------------------------------------------------------------------------------------------------------
+
+	printf("End\n");
 	return 0;
 
 }
@@ -501,15 +520,20 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 	fprintf(outTxt,"%d,%d\n",pos_row,pos_col);
 
 	int k;
-	long i,l,i_old,l_old;
+	long i,l,l_old;
+	//long i_old;
+	float pressure_sum,pressure_MultSum,slope;
+	pressure_MultSum = 0;
+	pressure_sum = 0;
+	slope = 0;
 	l = 0;
 	l_old = 0;
-	i_old = 0;
+	//i_old = 0;
+
 
 	float profit_value,dirAngle,tailComponent,crossComponent;
 
-	//vectAngle = angle between the wind vector and the vector orthogonal to the
-	//direction vector; or the crosswind vector
+//vectAngle = angle between the wind vector and the vector orthogonal to the direction vector; or the crosswind vector
 	float dir_v,dir_u,vectAngle;
 	
 	long skip_size = (SKIP_TIMESTEPS * LONG_SIZE  * LAT_SIZE) - 1;
@@ -523,97 +547,111 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		dir_v = 0;
 		dir_u = 0;
 		dirAngle = 0;
+		l_old = 0;
+		printf("At timestep Check\n");
 
-		if(pressureData[i] - pressureData[i_old] < 0) {
-
-
-		}
-
-		for(k=0;k<6;k++,l++ ) {
-			i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;	
+//If current pressure is greater than pressure in the previous day
+		//if(pressureData[i] - old_pressure > 0) {
+			printf("Main loop\n");
+			for(k=0;k<6;k++,l++ ) {
+				i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;	
 			
 			
-			dirAngle = dirData[pos_row * LAT_SIZE + pos_col];				
+				dirAngle = dirData[pos_row * LAT_SIZE + pos_col];				
 
-			//The grid is upside down; v increases from top to bottom while
-			//u increases from left to right
-			if(dirAngle <= 90){
-				dirAngle = 90 - dirAngle;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
-				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
-			}
-			else if((dirAngle > 90) && (dirAngle <= 180)){ 
-				dirAngle -= 90;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
-				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
-			}
-			else if((dirAngle > 180) && (dirAngle <= 270)) {
-		 		dirAngle = 270 - dirAngle;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
-				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
-			}
-			else if((dirAngle > 270) && (dirAngle <= 360)){
-				dirAngle -= 270;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
-				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
-			}
+//The grid is upside down; v increases from top to bottom while u increases from left to right
+				if(dirAngle <= 90){
+					dirAngle = 90 - dirAngle;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
+				}
+				else if((dirAngle > 90) && (dirAngle <= 180)){ 
+					dirAngle -= 90;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
+				}
+				else if((dirAngle > 180) && (dirAngle <= 270)) {
+			 		dirAngle = 270 - dirAngle;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
+				}
+				else if((dirAngle > 270) && (dirAngle <= 360)){
+					dirAngle -= 270;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
+				}
 			
-			//Getting the tail component of the wind; or the component of the
-			//wind in the desired direction of flight
-			tailComponent = (dir_v * vdata[i] + dir_u * udata[i]);
-			tailComponent = tailComponent/sqrt(udata[i]*udata[i] + vdata[i]*vdata[i]);
+//Getting the tail component of the wind; or the component of the wind in the desired direction of flight
+				tailComponent = (dir_v * vdata[i] + dir_u * udata[i]);
+				tailComponent = tailComponent/sqrt(udata[i]*udata[i] + vdata[i]*vdata[i]);
 
 
-			//Separate profit value methods have to be used if the tail component is less that equal to
-			//or greater than the desired speed of the birds
-			if(tailComponent <= DESIRED_SPEED) {
-				profit_value = getProfitValue(udata,vdata,dirData,i,pos_row * LAT_SIZE + pos_col);
-			}
-			else {
-				vectAngle = (dir_v * vdata[i] + dir_u * udata[i]);
-				vectAngle = acos(vectAngle / sqrt((udata[i]*udata[i] + vdata[i]* vdata[i])*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);	
-				vectAngle = (vectAngle <= 90)? 90 - vectAngle: vectAngle - 90;
+//Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds
+				if(tailComponent <= DESIRED_SPEED) {
+					profit_value = getProfitValue(udata,vdata,dirData,i,pos_row * LAT_SIZE + pos_col);
+				}
+				else {
+					vectAngle = (dir_v * vdata[i] + dir_u * udata[i]);
+					vectAngle = acos(vectAngle / sqrt((udata[i]*udata[i] + vdata[i]* vdata[i])*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);	
+					vectAngle = (vectAngle <= 90)? 90 - vectAngle: vectAngle - 90;
 			
-				crossComponent = sqrt(udata[i]*udata[i] + vdata[i]*vdata[i])/cos(vectAngle);
+					crossComponent = sqrt(udata[i]*udata[i] + vdata[i]*vdata[i])/cos(vectAngle);
 
-				//Getting the absolute value
-				crossComponent = (crossComponent<0)? crossComponent * (-1):crossComponent;
-				profit_value = tailComponent - crossComponent; 
+//Getting the absolute value
+					crossComponent = (crossComponent<0)? crossComponent * (-1):crossComponent;
+					profit_value = tailComponent - crossComponent; 
 
-				printf("Over the Desired Speed\n");
-			}
+					printf("Over the Desired Speed\n");
+				}
 
-			//if ((profit_value >= MIN_PROFIT) ) { 
-			//Adding precip value 
-			if ((profit_value >= MIN_PROFIT) && (precipData[i] < 2) ) { 
-				//printf("Found value %f\n",profit_value);
-				pos_row = (int)(rintf(pos_row + vdata[i] + dir_v));
-				pos_col = (int)(rintf(pos_col + udata[i] + dir_u));	
-				//printf("%d,%d\n",pos_row,pos_col);
-				float tmp;
-				tmp = sqrt((vdata[i]+dir_v)*(vdata[i]+dir_v) + (udata[i]+dir_u)*(udata[i]+dir_u));
-				printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
+//Adding precip value 
+				if ((profit_value >= MIN_PROFIT) && (precipData[i] < 2) ) { 
+					//printf("Found value %f\n",profit_value);
+					pos_row = (int)(rintf(pos_row + vdata[i] + dir_v));
+					pos_col = (int)(rintf(pos_col + udata[i] + dir_u));	
+					//printf("%d,%d\n",pos_row,pos_col);
+					float tmp;
+					tmp = sqrt((vdata[i]+dir_v)*(vdata[i]+dir_v) + (udata[i]+dir_u)*(udata[i]+dir_u));
+					printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
 
-				//printf("%ld\n",i);
-				//printf("%ld \t %ld \t %d \t %f \t %d \t %d \t (%f,%f)\n",i,l,k,profit_value,pos_row,pos_col,vdata[i],udata[i]);
-				//fprintf(outTxt,"%d,%d\n",pos_row,pos_col); 
+					//printf("%ld\n",i);
+					printf("%ld \t %ld \t %d \t %f \t %f \t %d \t %d \t (%f,%f)\n",i,l,k,precipData[i],profit_value,pos_row,pos_col,vdata[i],udata[i]);
+					//fprintf(outTxt,"%d,%d\n",pos_row,pos_col); 
 				
+				}
+				else { 
+									
+//Goes back to the original starting hour for the bird; i.e 6pm					
+					//l = l - k;
+					//l_old = l + 12;
+					//printf("Skipped Wind (%f,%f) @ (%d,%d)\n",udata[i],vdata[i],pos_row,pos_col);
+					break; 
+				}
 			}
-			else { 
-				//i = i - k + 6;				
-				//Goes back to the original starting hour for the bird; i.e 6pm
-				l_old = l;
-				l = l - k;
-				//printf("Skipped Wind (%f,%f) @ (%d,%d)\n",udata[i],vdata[i],pos_row,pos_col);
-				break; 
-			}
-		}
-		
-		
 
-		i_old = skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
-		l += 24;
-		i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
+//Goes back to the original starting hour for the bird; i.e 6pm	
+			if (k==6){ 
+//Corrected method; Was l-=7 before which is incorrect
+				l-=6;
+				l_old = l + 12;
+			}
+			else{
+				l = l - k;
+				l_old = l + 12;
+			}
+
+
+			for(k=0; l_old<=(l_old+REGRESSION_HRS) && (k<=REGRESSION_HRS); l_old++,k++){
+				pressure_sum += pressureData[skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col];
+				pressure_MultSum += k * pressureData[skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col];
+			}
+			
+			slope = ((REGRESSION_HRS * pressure_MultSum) - (pressure_sum * HRS_SUM))/(DENOM_SLOPE);
+			printf("\t Slope is:: %f\n",slope);
+			//old_pressure = pressureData[i_old];
+			l += 24;
+			i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
+			printf("Running\n");
 		
 		
 
