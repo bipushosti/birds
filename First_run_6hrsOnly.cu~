@@ -51,7 +51,8 @@ Precipitation = millimeters
 */
 //--------------------------------------------------------------------------------------------------------------------------
 void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData,float* precipData,float* pressureData);
-float getProfitValue(float* udata,float* vdata,float* dirData,long index,long pos);
+float getProfitValue(float u,float v,float dirVal);
+float bilinear_interpolation(float x,float y,float* data_array,long l);
 //--------------------------------------------------------------------------------------------------------------------------
 int main()
 {
@@ -510,20 +511,26 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 	slope = 0;
 	l = 0;
 	l_old = 0;
-	float profit_value,dirAngle,tailComponent,crossComponent;
+	float profit_value,dirAngle,actualAngle,tailComponent,crossComponent;
 
 	//vectAngle = angle between the wind vector and the vector orthogonal to the direction vector; or the crosswind vector
 	float dir_v,dir_u,vectAngle;
-	long skip_size = (SKIP_TIMESTEPS * LONG_SIZE * LAT_SIZE) - 1;
+	//long skip_size = (SKIP_TIMESTEPS * LONG_SIZE * LAT_SIZE) - 1;
+	long skip_size = 0;
+	
+
+	float u_val,v_val;
 	//skip_size = 120174
 
-	printf("i \t l \t k \t precipData \t profit_value \t pos_row \t pos_col \t (vdata[i],udata[i])\n");
+	printf("i \t l \t k \t precipData \t profit_value \t pos_row \t pos_col \t (v_val,u_val)\n");
 	i = skip_size +pos_row * LAT_SIZE + pos_col;
 	while( i <= (TIMESTEPS-1) * LAT_SIZE * LONG_SIZE ) {
 		dir_v = 0;
 		dir_u = 0;
 		dirAngle = 0;
-		//l_old = 1;
+		actualAngle = 0;
+		u_val = 0;
+		v_val = 0;
 		slope = 0;
 		pressure_sum = 0;
 		pressure_MultSum = 0;
@@ -539,6 +546,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 			
 			//dirAngle is with respect to North or the positive y-axis
 			dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+			actualAngle = dirAngle;
 
 			//The grid is not upside down anymore; 
 			//dir_v and dir_u are the x and y components of the wind (v=y,u=x)
@@ -564,21 +572,25 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 			}
 
 
+			//Bilinear interpolation for u and v data
+			u_val = bilinear_interpolation(pos_col,pos_row,udata,l);
+			v_val = bilinear_interpolation(pos_col,pos_row,vdata,l);
+			
 			//Getting the tail component of the wind; or the component of the wind in the desired direction of flight
 			//From formula of getting the vector projection of wind onto the desired direction
-			tailComponent = (dir_v * vdata[i] + dir_u * udata[i]);
-			tailComponent = tailComponent/sqrt(udata[i]*udata[i] + vdata[i]*vdata[i]);
+			tailComponent = (dir_v * v_val + dir_u * u_val);
+			tailComponent = tailComponent/sqrt(u_val*u_val + v_val*v_val);
 			//Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds
 
 
 			if(tailComponent <= DESIRED_SPEED) {
-				profit_value = getProfitValue(udata,vdata,dirData,i,pos_row * LAT_SIZE + pos_col);
+				profit_value = getProfitValue(u_val,v_val,actualAngle);
 			}
 			else {
-				vectAngle = (dir_v * vdata[i] + dir_u * udata[i]);
-				vectAngle = acos(vectAngle / sqrt((udata[i]*udata[i] + vdata[i]* vdata[i])*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);
+				vectAngle = (dir_v * v_val + dir_u * u_val);
+				vectAngle = acos(vectAngle / sqrt((u_val*u_val + v_val* v_val)*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);
 				vectAngle = (vectAngle <= 90)? 90 - vectAngle: vectAngle - 90;
-				crossComponent = sqrt(udata[i]*udata[i] + vdata[i]*vdata[i])/cos(vectAngle);
+				crossComponent = sqrt(u_val*u_val + v_val*v_val)/cos(vectAngle);
 				//Getting the absolute value
 				crossComponent = (crossComponent<0)? crossComponent * (-1):crossComponent;
 				profit_value = tailComponent - crossComponent;
@@ -591,35 +603,20 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 
 				//Positon is in a 10 km grid. This means for 1m/s, the 
 				//position change in 1 hour is 3.6/10 = 0.36units in the grid
-				pos_row = pos_row + (vdata[i] + dir_v)*0.36;
-				pos_col = pos_col + (udata[i] + dir_u)*0.36;
+				pos_row = pos_row + (v_val + dir_v)*0.36;
+				pos_col = pos_col + (u_val + dir_u)*0.36;
 
-				//Bilinear transformation
-
-
-
-
-
-
-
-
-
-
-
-				//printf("%d,%d\n",pos_row,pos_col);
 				float tmp;
-				tmp = sqrt((vdata[i]+dir_v)*(vdata[i]+dir_v) + (udata[i]+dir_u)*(udata[i]+dir_u));
+				tmp = sqrt((v_val+dir_v)*(v_val+dir_v) + (u_val+dir_u)*(u_val+dir_u));
 				printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
-				//printf("%ld\n",i);
 				
-				printf("%ld \t %ld \t %d \t %f \t %f \t %d \t %d \t (%f,%f)\n",i,l,k,precipData[i],profit_value,pos_row,pos_col,vdata[i],udata[i]);
-				//fprintf(outTxt,"%d,%d\n",pos_row,pos_col);
+				printf("%ld \t %ld \t %d \t %f \t %f \t %d \t %d \t (%f,%f)\n",i,l,k,precipData[i],profit_value,pos_row,pos_col,v_val,u_val);
 			}
 			else {
 				//Goes back to the original starting hour for the bird; i.e 7pm
 				// 5-k because l++ will be done in the end
 				l += (5-k);
-				printf("Skipped Wind (%f,%f) @ (%d,%d)w_profit = %f\n",udata[i],vdata[i],pos_row,pos_col,profit_value);
+				printf("Skipped Wind (%f,%f) @ (%d,%d)w_profit = %f\n",u_val,v_val,pos_row,pos_col,profit_value);
 				break;
 			}
 		}
@@ -658,7 +655,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 
 
 
-float bilinear_interpolation(float x,float y,float* data_array)
+float bilinear_interpolation(float x,float y,float* data_array,long l)
 {
 	int x1,y1,x2,y2;
 	float value,Q11,Q12,Q21,Q22;
@@ -668,10 +665,10 @@ float bilinear_interpolation(float x,float y,float* data_array)
 	y1 = (int)floorf(y);
 	y2 = (int)ceilf(y);
 
-	Q11 = data_array[y1 * LAT_SIZE + x1 ];
-	Q12 = data_array[y2 * LAT_SIZE + x1 ];
-	Q21 = data_array[y1 * LAT_SIZE + x2 ];
-	Q22 = data_array[y2 * LAT_SIZE + x2 ];
+	Q11 = data_array[l  * LAT_SIZE * LONG_SIZE + y1 * LAT_SIZE + x1 ];
+	Q12 = data_array[l  * LAT_SIZE * LONG_SIZE + y2 * LAT_SIZE + x1 ];
+	Q21 = data_array[l  * LAT_SIZE * LONG_SIZE + y1 * LAT_SIZE + x2 ];
+	Q22 = data_array[l  * LAT_SIZE * LONG_SIZE + y2 * LAT_SIZE + x2 ];
 
 	value =(float)(((x2-x1)*((y2-y)*Q11 + (y-y1)*Q12) + (x-x1)*((y2-y1)*Q21 +(y-y1)*Q22))/((x2-x1)*(y2-y1)));
 	return value;
