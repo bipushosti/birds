@@ -543,7 +543,6 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		l += 24;
 		i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
 		printf("Running\n");
-		fprintf(outTxt,"%d,%d\n",pos_row,pos_col);
 	}
 }
 
