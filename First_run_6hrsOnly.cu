@@ -17,11 +17,14 @@
 #define SKIP_TIMESTEPS	0
 //#define DESIRED_ROW
 //#define DESIRED_COL
-#define STARTING_ROW	200.0
-#define STARTING_COL	100.0
+#define STARTING_ROW	150.0
+#define STARTING_COL	150.0
 #define DESIREDANGLE	90	//In degrees
-#define DESIRED_SPEED	3.6	//In km/hr; Since the grid size is 10x10km,and birds want to
-				//travel at 10m/s, it is 36km/hr.And in this grid 3.6 units per hour. 
+
+//#define DESIRED_SPEED	3.6		//Birds want to travel at 10m/s, it is 36km/hr(in the grid it is 3.6 units per hour) 
+#define DESIRED_SPEED	10
+
+	
 #define MIN_PROFIT	-7
 //Defining the x-variable size, it's sum and
 //sum of squares as needed for slope calculation
@@ -34,6 +37,9 @@
 //This helps in reducing the size of the data.
 
 #define REGRESSION_HRS	6
+
+//Precipitation (mm/hr) below which birds can fly
+#define MAX_PRECIP	2
 
 //HRS_SUM = sum(1 to 12) before. Now has to be sum(1 to 6) = 21
 #define HRS_SUM	21
@@ -112,7 +118,7 @@ int main()
 	}
 
 	FILE* dirTxt;
-	dirTxt = fopen("South_direction.txt","r");
+	dirTxt = fopen("extP_crop.txt","r");
 	if(dirTxt == NULL) {
 		perror("Cannot open file with direction data\n");
 		return -1;
@@ -259,6 +265,8 @@ int main()
 
 //----------------------------------Reading precipitation Values-----------------------------//
 
+// Precipitation value read from the text file is multiplied by 3600 to convert from
+// kg/(m2*s1) into mm/hour. Formula from: https://www.dkrz.de/daten-en/faq
 
 	memset(line,'\0',sizeof(line));
 	memset(tempVal,'\0',sizeof(tempVal));
@@ -275,14 +283,14 @@ int main()
 			if(i != (LAT_SIZE - 1)) {
 				endPtr = strchr(startPtr,',');
 				strncpy(tempVal,startPtr,endPtr-startPtr);
-				Value = atof(tempVal);
+				Value = atof(tempVal)*3600;
 				precipData[j * LAT_SIZE + i] = Value;
 				endPtr = endPtr + 1;
 				startPtr = endPtr;
 			}
 			else if(i == (LAT_SIZE - 1)){
 				strcpy(tempVal,startPtr);
-				Value = atof(tempVal);
+				Value = atof(tempVal)*3600;
 				precipData[j * LAT_SIZE + i] = Value;
 			}
 		}
@@ -348,12 +356,12 @@ int main()
 	for(j=0;j<LONG_SIZE;j++) {
 		for(i=0;i<LAT_SIZE;i++) {
 			if(i == LAT_SIZE -1) {
-				fprintf(inpCheckU,"%f\n",dirData[j * LAT_SIZE + i]);
+				fprintf(inpCheckU,"%f\n",precipData[j * LAT_SIZE + i]);
 				//fprintf(inpCheckV,"%f\n",=data[j * LAT_SIZE + i]);
 				//printf("%f\n",dirData[j * LAT_SIZE + i]);
 			}
 			else {
-			fprintf(inpCheckU,"%f ",dirData[j * LAT_SIZE + i]);
+			fprintf(inpCheckU,"%f ",precipData[j * LAT_SIZE + i]);
 			//fprintf(inpCheckV,"%f ",vdata[j * LAT_SIZE + i]);
 			}
 		}
@@ -509,7 +517,7 @@ float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSi
 	y2 = ceilf(y);
 	value = 0;
 	
-	printf("x1:%f,x2:%f,y1:%f,y2:%f\n",x1,x2,y1,y2);
+	//printf("x1:%f,x2:%f,y1:%f,y2:%f\n",x1,x2,y1,y2);
 	if(dataSize == 1){
 		Q11 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LAT_SIZE + x1) ];
 		Q12 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y2 * LAT_SIZE + x1) ];
@@ -550,7 +558,7 @@ float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSi
 	else{
 		value =((x2-x)* ((y2-y)*Q11 + (y-y1)*Q12)+(x-x1)*((y2-y)*Q21 +(y-y1)*Q22))/((x2-x1)*(y2-y1));
 	}
-	printf("Q11:%f,Q12:%f,Q21:%f,Q22:%f; And Value=%f\n",Q11,Q12,Q21,Q22,value);
+	//printf("Q11:%f,Q12:%f,Q21:%f,Q22:%f; And Value=%f\n",Q11,Q12,Q21,Q22,value);
 	return value;
 }
 
@@ -583,7 +591,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 	float u_val,v_val,precip_val;
 	//skip_size = 120174
 	
-	fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
+	//fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
 
 	printf("i \t l \t k \t precipData \t profit_value \t pos_row \t pos_col \t (v_val,u_val)\n");
 	i = skip_size +pos_row * LAT_SIZE + pos_col;
@@ -615,30 +623,30 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 			//dir_v and dir_u are the x and y components of the wind (v=y,u=x)
 			if(dirAngle <= 90){
 				dirAngle = 90 - dirAngle;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
 				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
 			}
 			else if((dirAngle > 90) && (dirAngle <= 180)){
 				dirAngle -= 90;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));// * -1;
 				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
 			}
 			else if((dirAngle > 180) && (dirAngle <= 270)) {
 				dirAngle = 270 - dirAngle;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));// * -1;
 				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
 			}
 			else if((dirAngle > 270) && (dirAngle <= 360)){
 				dirAngle -= 270;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
 				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
 			}
 
 
 			//Bilinear interpolation for u and v data
-			printf("\n U850 Interpolation\n");
+			//printf("\n U850 Interpolation\n");
 			u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);
-			printf("\n V850 Interpolation\n");
+			//printf("\n V850 Interpolation\n");
 			v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
 			printf("(u_val,v_val)::(%f,%f)\n",u_val,v_val);
 			
@@ -662,11 +670,11 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 				profit_value = tailComponent - crossComponent;
 				printf("Over the Desired Speed\n");
 			}
-			printf("\nPrecipitation Interpolation\n");
+			//printf("\nPrecipitation Interpolation\n");
 			precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
 			//Adding precip value
 			//if ((profit_value >= MIN_PROFIT) && (precipData[i] < 2) ) {
-			if ((profit_value >= MIN_PROFIT) && (precip_val < 2) ) {
+			if ((profit_value >= MIN_PROFIT) && (precip_val < MAX_PRECIP) ) {
 				
 
 				//Positon is in a 10 km grid. This means for 1m/s, the 
@@ -684,7 +692,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 				//Goes back to the original starting hour for the bird; i.e 7pm
 				// 6-k because l++ will not be done in the end because it breaks from the loop
 				l += (6-k);
-				printf("Skipped Wind (%f,%f) @ (%f,%f)w_profit = %f,And l = %ld\n",u_val,v_val,pos_row,pos_col,profit_value,l);
+				printf("Skipped Wind (%f,%f) @ (%f,%f)w_profit = %f,precip=%f,And l = %ld\n",u_val,v_val,pos_row,pos_col,profit_value,precip_val,l);
 				break;
 			}
 			fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
@@ -692,7 +700,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 
 		for(k=1; (l_old < l) && (k<=REGRESSION_HRS); l_old++,k++){
 
-			printf("\nPressure Sum Interpolation\n");
+			//printf("\nPressure Sum Interpolation\n");
 			pressure_sum += bilinear_interpolation(pos_col,pos_row,pressureData,l_old,1);
 			//pressure_sum += pressureData[skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col];
 			pressure_MultSum += k * pressure_sum;
@@ -700,7 +708,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 
 			if(k == REGRESSION_HRS) {
 				//last_pressure = pressureData[skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col];
-				printf("\n Last Pressure Interpolation\n");
+				//printf("\n Last Pressure Interpolation\n");
 				last_pressure = bilinear_interpolation(pos_col,pos_row,pressureData,l_old,1);
 			}
 		}

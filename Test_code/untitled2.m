@@ -26,7 +26,7 @@ function untitled2()
                 dir = 'V10';
             end
             
-            filename = strcat('~/Documents/Birds/output/',dir,'/CFSR_NA-East_10km_',dir,'_2009-08-',num,'.nc');
+            filename = strcat('~/Documents/Birds_Full/Birds_data/output/',dir,'/CFSR_NA-East_10km_',dir,'_2009-08-',num,'.nc');
             importNetCDF(filename,dir);
 
             for i= 1:2
