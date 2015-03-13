@@ -19,7 +19,7 @@
 //#define DESIRED_COL
 #define STARTING_ROW	150.0
 #define STARTING_COL	150.0
-#define DESIREDANGLE	90	//In degrees
+
 
 //#define DESIRED_SPEED	3.6		//Birds want to travel at 10m/s, it is 36km/hr(in the grid it is 3.6 units per hour) 
 #define DESIRED_SPEED	10
@@ -118,7 +118,7 @@ int main()
 	}
 
 	FILE* dirTxt;
-	dirTxt = fopen("extP_crop.txt","r");
+	dirTxt = fopen("ext_crop.txt","r");
 	if(dirTxt == NULL) {
 		perror("Cannot open file with direction data\n");
 		return -1;
@@ -471,11 +471,11 @@ float getProfitValue(float u,float v,float dirVal)
 	
 	if ((v == 0)&&( u > 0)){
 		angle = 90;
-		diffAngle = dirVal - angle;
+		diffAngle = abs(dirVal - angle);
 	}
 	else if ((v == 0)&&( u < 0)){
 		angle = 270;
-		diffAngle = angle - dirVal;
+		diffAngle = abs(angle - dirVal);
 	}
 	else if ((v > 0)&&( u == 0)){
 		angle = 0;
@@ -483,14 +483,41 @@ float getProfitValue(float u,float v,float dirVal)
 	}
 	else if ((v < 0)&&( u == 0)){
 		angle = 180;
-		diffAngle = angle - dirVal;
+		diffAngle = abs(angle - dirVal);
 	}
-	else {
-		angle = tanf(u/v) * (180/PI);
-		diffAngle = dirVal - angle;
+
+	//abs value taken so as to take the angles with respect to 
+	//quadrant 1. tangent graph is always positive when angle is >0
+	//and <90 but negative when angle is >-90 and <0. So no need to check
+	//if the value is negative
+	else if((v>0)&&(u>0)){	//Quadrant 1
+		u = abs(u);
+		v = abs(v);
+		angle = atanf(u/v) * (180/PI);
+		diffAngle = abs(angle - dirVal);
 	}
+	else if((v<0)&&(u>0)){	//Quadrant 2
+		u = abs(u);
+		v = abs(v);
+		angle = atanf(v/u) * (180/PI) + 90;
+		diffAngle = abs(angle - dirVal);
+	}
+	else if((v<0)&&(u<0)){	//Quadrant 3
+		u = abs(u);
+		v = abs(v);
+		angle = atanf(u/v) * (180/PI) + 180;
+		diffAngle = abs(angle - dirVal);
+	}
+	else if((v>0)&&(u<0)){	//Quadrant 4
+		u = abs(u);
+		v = abs(v);
+		angle = atanf(v/u) * (180/PI) + 270;
+		diffAngle = abs(angle - dirVal);
+	}
+
+	printf("dirVal = %f,angle= %f,diffAngle = %f\n",dirVal,angle,diffAngle);
+	//Getting the smaller angle
 	if(diffAngle > 180) diffAngle = 360 - diffAngle;
-	if(diffAngle < 0) diffAngle = diffAngle * -1;
 	if(diffAngle > 360) diffAngle = diffAngle - 360;
 	wind_profit = (DESIRED_SPEED * DESIRED_SPEED) + magnitude_squared - 2 * DESIRED_SPEED * magnitude * cos(diffAngle * PI/180);
 	wind_profit = DESIRED_SPEED - (float)sqrt(wind_profit);
@@ -623,22 +650,22 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 			//dir_v and dir_u are the x and y components of the wind (v=y,u=x)
 			if(dirAngle <= 90){
 				dirAngle = 90 - dirAngle;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
 				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
 			}
 			else if((dirAngle > 90) && (dirAngle <= 180)){
 				dirAngle -= 90;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));// * -1;
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
 				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
 			}
 			else if((dirAngle > 180) && (dirAngle <= 270)) {
 				dirAngle = 270 - dirAngle;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));// * -1;
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
 				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
 			}
 			else if((dirAngle > 270) && (dirAngle <= 360)){
 				dirAngle -= 270;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
 				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
 			}
 
@@ -679,7 +706,8 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 
 				//Positon is in a 10 km grid. This means for 1m/s, the 
 				//position change in 1 hour is 3.6/10 = 0.36units in the grid
-				pos_row = pos_row + (v_val + dir_v)*0.36;
+//				pos_row = pos_row + (v_val + dir_v)*0.36;
+				pos_row = pos_row - (v_val + dir_v)*0.36;
 				pos_col = pos_col + (u_val + dir_u)*0.36;
 
 				float tmp;
