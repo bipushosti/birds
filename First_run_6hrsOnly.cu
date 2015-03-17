@@ -56,8 +56,8 @@ Year = 2009
 Precipitation = millimeters
 */
 //--------------------------------------------------------------------------------------------------------------------------
-void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData,float* precipData,float* pressureData);
-float getProfitValue(float u,float v,float dirVal);
+void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData,float* precipData,float* pressureData,float* u10data,float* v10data);
+float getProfitValue(float u,float v,float dirVal,float dir_u,float dir_v);
 float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSize);
 //--------------------------------------------------------------------------------------------------------------------------
 int main()
@@ -366,7 +366,7 @@ int main()
 			}
 		}
 	}
-	get_movementData(posdataTxt,udata,vdata,dirData,precipData,pressureData);
+	get_movementData(posdataTxt,udata,vdata,dirData,precipData,pressureData,u10data,v10data);
 
 
 	/*
@@ -457,12 +457,105 @@ int main()
 //------------------------------------------------------------------------------------------------------------------------------------
 //------------------------------------------------------------------------------------------------------------------------------------
 
-float getProfitValue(float u,float v,float dirVal)
+float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v)
 {
 	//All wind data in m/s
-	float angle,diffAngle,magnitude,magnitude_squared,wind_profit;
-	magnitude_squared = u * u + v * v;
+	float angle,diffAngle,magnitude,magnitude_squared;
+
+	//vectAngle = angle between the wind vector and the vector orthogonal to the direction vector; or the crosswind vector
+	float tailComponent,vectAngle,crossComponent,profit_value;
+	tailComponent = 0;
+
+	magnitude_squared = u_val * u_val + v_val * v_val;
 	magnitude = (float)sqrt(magnitude_squared);
+
+
+	//Getting the tail component of the wind; or the component of the wind in the desired direction of flight
+	//From formula of getting the vector projection of wind onto the desired direction
+	tailComponent = (dir_v * v_val + dir_u * u_val);
+	tailComponent = tailComponent/sqrt(u_val*u_val + v_val*v_val);
+	//Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds
+
+
+	if(tailComponent <= DESIRED_SPEED) {
+		//profit_value = getProfitValue(u_val,v_val,actualAngle);
+
+		//DiffAngle is the angle between the desired direction of the bird 
+		//and the direction of the wind
+		//DiffAngle has to be calculated such that both the vectors are pointing
+		//away from where they meet.
+	
+		if ((v_val == 0)&&( u_val > 0)){
+			angle = 90;
+			diffAngle = abs(dirVal - angle);
+		}
+		else if ((v_val == 0)&&( u_val < 0)){
+			angle = 270;
+			diffAngle = abs(angle - dirVal);
+		}
+		else if ((v_val > 0)&&( u_val == 0)){
+			angle = 0;
+			diffAngle = dirVal + angle;
+		}
+		else if ((v_val < 0)&&( u_val == 0)){
+			angle = 180;
+			diffAngle = abs(angle - dirVal);
+		}
+
+		//abs value taken so as to take the angles with respect to 
+		//quadrant 1. tangent graph is always positive when angle is >0
+		//and <90 but negative when angle is >-90 and <0. So no need to check
+		//if the value is negative
+		else if((v_val>0)&&(u_val>0)){	//Quadrant 1
+			u_val = abs(u_val);
+			v_val = abs(v_val);
+			angle = atanf(u_val/v_val) * (180/PI);
+			diffAngle = abs(angle - dirVal);
+		}
+		else if((v_val<0)&&(u_val>0)){	//Quadrant 2
+			u_val = abs(u_val);
+			v_val = abs(v_val);
+			angle = atanf(v_val/u_val) * (180/PI) + 90;
+			diffAngle = abs(angle - dirVal);
+		}
+		else if((v_val<0)&&(u_val<0)){	//Quadrant 3
+			u_val = abs(u_val);
+			v_val = abs(v_val);
+			angle = atanf(u_val/v_val) * (180/PI) + 180;
+			diffAngle = abs(angle - dirVal);
+		}
+		else if((v_val>0)&&(u_val<0)){	//Quadrant 4
+			u_val = abs(u_val);
+			v_val = abs(v_val);
+			angle = atanf(v_val/u_val) * (180/PI) + 270;
+			diffAngle = abs(angle - dirVal);
+		}
+
+		printf("dirVal = %f,angle= %f,diffAngle = %f\n",dirVal,angle,diffAngle);
+		//Getting the smaller angle
+		if(diffAngle > 180) diffAngle = 360 - diffAngle;
+		if(diffAngle > 360) diffAngle = diffAngle - 360;
+		profit_value = (DESIRED_SPEED * DESIRED_SPEED) + magnitude_squared - 2 * DESIRED_SPEED * magnitude * cos(diffAngle * PI/180);
+		profit_value = DESIRED_SPEED - (float)sqrt(profit_value);
+	}
+	else {
+		vectAngle = (dir_v * v_val + dir_u * u_val);
+		vectAngle = acos(vectAngle / sqrt((u_val*u_val + v_val* v_val)*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);
+		vectAngle = (vectAngle <= 90)? 90 - vectAngle: vectAngle - 90;
+		crossComponent = sqrt(u_val*u_val + v_val*v_val)/cos(vectAngle);
+		//Getting the absolute value
+		crossComponent = (crossComponent<0)? crossComponent * (-1):crossComponent;
+		profit_value = tailComponent - crossComponent;
+		printf("Over the Desired Speed\n");
+	}
+
+
+
+
+
+
+
+/*
 
 	//DiffAngle is the angle between the desired direction of the bird 
 	//and the direction of the wind
@@ -521,7 +614,8 @@ float getProfitValue(float u,float v,float dirVal)
 	if(diffAngle > 360) diffAngle = diffAngle - 360;
 	wind_profit = (DESIRED_SPEED * DESIRED_SPEED) + magnitude_squared - 2 * DESIRED_SPEED * magnitude * cos(diffAngle * PI/180);
 	wind_profit = DESIRED_SPEED - (float)sqrt(wind_profit);
-	return wind_profit;
+*/
+	return profit_value;
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------
@@ -591,7 +685,7 @@ float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSi
 
 //-------------------------------------------------------------------------------------------------------------------------------------
 //Main part of the function
-void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, float* precipData,float* pressureData)
+void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, float* precipData,float* pressureData,float* u10data,float* v10data)
 {
 	float pos_row,pos_col;
 	//pos_row = LONG_SIZE - STARTING_ROW;
@@ -607,15 +701,15 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 	slope = 0;
 	l = 0;
 	l_old = 0;
-	float profit_value,dirAngle,actualAngle,tailComponent,crossComponent;
+	float profit_value,dirAngle,actualAngle;
 
-	//vectAngle = angle between the wind vector and the vector orthogonal to the direction vector; or the crosswind vector
-	float dir_v,dir_u,vectAngle;
+	
+	float dir_v,dir_u;
 	//long skip_size = (SKIP_TIMESTEPS * LONG_SIZE * LAT_SIZE) - 1;
 	long skip_size = 0;
 	
 
-	float u_val,v_val,precip_val;
+	float u_val,v_val,precip_val,v_ten,u_ten;
 	//skip_size = 120174
 	
 	//fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
@@ -630,6 +724,8 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		u_val = 0;
 		v_val = 0;
 		precip_val = 0;
+		v_ten = 0;
+		u_ten = 0;
 		slope = 0;
 		pressure_sum = 0;
 		pressure_MultSum = 0;
@@ -637,95 +733,135 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		//if(pressureData[i] - old_pressure > 0) {
 		printf("Main loop[k]\n");
 
+		u_ten = bilinear_interpolation(pos_col,pos_row,u10data,l,1);
+		v_ten = bilinear_interpolation(pos_col,pos_row,v10data,l,1);
+		dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+		actualAngle = dirAngle;
 
-		
-		for(k=0;k<6;k++,l++ ) {
-			i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
-			
-			//dirAngle is with respect to North or the positive y-axis
-			dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
-			actualAngle = dirAngle;
-
-			//The grid is not upside down anymore; 
-			//dir_v and dir_u are the x and y components of the wind (v=y,u=x)
-			if(dirAngle <= 90){
-				dirAngle = 90 - dirAngle;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
-				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
-			}
-			else if((dirAngle > 90) && (dirAngle <= 180)){
-				dirAngle -= 90;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
-				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
-			}
-			else if((dirAngle > 180) && (dirAngle <= 270)) {
-				dirAngle = 270 - dirAngle;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
-				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
-			}
-			else if((dirAngle > 270) && (dirAngle <= 360)){
-				dirAngle -= 270;
-				dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
-				dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
-			}
-
-
-			//Bilinear interpolation for u and v data
-			//printf("\n U850 Interpolation\n");
-			u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);
-			//printf("\n V850 Interpolation\n");
-			v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
-			printf("(u_val,v_val)::(%f,%f)\n",u_val,v_val);
-			
-			//Getting the tail component of the wind; or the component of the wind in the desired direction of flight
-			//From formula of getting the vector projection of wind onto the desired direction
-			tailComponent = (dir_v * v_val + dir_u * u_val);
-			tailComponent = tailComponent/sqrt(u_val*u_val + v_val*v_val);
-			//Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds
-
-
-			if(tailComponent <= DESIRED_SPEED) {
-				profit_value = getProfitValue(u_val,v_val,actualAngle);
-			}
-			else {
-				vectAngle = (dir_v * v_val + dir_u * u_val);
-				vectAngle = acos(vectAngle / sqrt((u_val*u_val + v_val* v_val)*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);
-				vectAngle = (vectAngle <= 90)? 90 - vectAngle: vectAngle - 90;
-				crossComponent = sqrt(u_val*u_val + v_val*v_val)/cos(vectAngle);
-				//Getting the absolute value
-				crossComponent = (crossComponent<0)? crossComponent * (-1):crossComponent;
-				profit_value = tailComponent - crossComponent;
-				printf("Over the Desired Speed\n");
-			}
-			//printf("\nPrecipitation Interpolation\n");
-			precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
-			//Adding precip value
-			//if ((profit_value >= MIN_PROFIT) && (precipData[i] < 2) ) {
-			if ((profit_value >= MIN_PROFIT) && (precip_val < MAX_PRECIP) ) {
-				
-
-				//Positon is in a 10 km grid. This means for 1m/s, the 
-				//position change in 1 hour is 3.6/10 = 0.36units in the grid
-//				pos_row = pos_row + (v_val + dir_v)*0.36;
-				pos_row = pos_row - (v_val + dir_v)*0.36;
-				pos_col = pos_col + (u_val + dir_u)*0.36;
-
-				float tmp;
-				tmp = sqrt((v_val+dir_v)*(v_val+dir_v) + (u_val+dir_u)*(u_val+dir_u));
-				//printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
-				
-				printf("%ld \t %ld \t %d \t %f \t %f \t %f \t %f \t (%f,%f)\n",i,l,k,precip_val,profit_value,pos_row,pos_col,v_val,u_val);
-			}
-			else {
-				//Goes back to the original starting hour for the bird; i.e 7pm
-				// 6-k because l++ will not be done in the end because it breaks from the loop
-				l += (6-k);
-				printf("Skipped Wind (%f,%f) @ (%f,%f)w_profit = %f,precip=%f,And l = %ld\n",u_val,v_val,pos_row,pos_col,profit_value,precip_val,l);
-				break;
-			}
-			fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
+		if(dirAngle <= 90){
+			dirAngle = 90 - dirAngle;
+			dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+			dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
+		}
+		else if((dirAngle > 90) && (dirAngle <= 180)){
+			dirAngle -= 90;
+			dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+			dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
+		}
+		else if((dirAngle > 180) && (dirAngle <= 270)) {
+			dirAngle = 270 - dirAngle;
+			dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+			dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
+		}
+		else if((dirAngle > 270) && (dirAngle <= 360)){
+			dirAngle -= 270;
+			dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+			dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
 		}
 
+		printf("10 profit value::%f\n",getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v));
+		if(getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v) >= MIN_PROFIT){
+			
+
+			for(k=0;k<6;k++,l++ ) {
+				i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
+			
+				//dirAngle is with respect to North or the positive y-axis
+				dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+				actualAngle = dirAngle;
+
+				//The grid is upside down; y increases from top to bottom while x increases from left to right 
+				//dir_v and dir_u are the x and y components of the wind (v=y,u=x)
+				if(dirAngle <= 90){
+					dirAngle = 90 - dirAngle;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
+				}
+				else if((dirAngle > 90) && (dirAngle <= 180)){
+					dirAngle -= 90;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
+				}
+				else if((dirAngle > 180) && (dirAngle <= 270)) {
+					dirAngle = 270 - dirAngle;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
+				}
+				else if((dirAngle > 270) && (dirAngle <= 360)){
+					dirAngle -= 270;
+					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
+					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
+				}
+
+
+				//Bilinear interpolation for u and v data
+				//printf("\n U850 Interpolation\n");
+				u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);
+				//printf("\n V850 Interpolation\n");
+				v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
+				printf("(u_val,v_val)::(%f,%f)\n",u_val,v_val);
+			
+
+	/*
+
+				//Getting the tail component of the wind; or the component of the wind in the desired direction of flight
+				//From formula of getting the vector projection of wind onto the desired direction
+				tailComponent = (dir_v * v_val + dir_u * u_val);
+				tailComponent = tailComponent/sqrt(u_val*u_val + v_val*v_val);
+				//Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds
+
+				if(tailComponent <= DESIRED_SPEED) {
+					profit_value = getProfitValue(u_val,v_val,actualAngle);
+				}
+				else {
+					vectAngle = (dir_v * v_val + dir_u * u_val);
+					vectAngle = acos(vectAngle / sqrt((u_val*u_val + v_val* v_val)*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);
+					vectAngle = (vectAngle <= 90)? 90 - vectAngle: vectAngle - 90;
+					crossComponent = sqrt(u_val*u_val + v_val*v_val)/cos(vectAngle);
+					//Getting the absolute value
+					crossComponent = (crossComponent<0)? crossComponent * (-1):crossComponent;
+					profit_value = tailComponent - crossComponent;
+					printf("Over the Desired Speed\n");
+				}
+	*/
+
+				profit_value = getProfitValue(u_val,v_val,actualAngle,dir_u,dir_v);
+			//printf("\nPrecipitation Interpolation\n");
+				precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
+				//Adding precip value
+				//if ((profit_value >= MIN_PROFIT) && (precipData[i] < 2) ) {
+				if ((profit_value >= MIN_PROFIT) && (precip_val < MAX_PRECIP) ) {
+				
+
+					//Positon is in a 10 km grid. This means for 1m/s, the 
+					//position change in 1 hour is 3.6/10 = 0.36units in the grid
+	//				pos_row = pos_row + (v_val + dir_v)*0.36;
+					pos_row = pos_row - (v_val + dir_v)*0.36;
+					pos_col = pos_col + (u_val + dir_u)*0.36;
+
+					float tmp;
+					tmp = sqrt((v_val+dir_v)*(v_val+dir_v) + (u_val+dir_u)*(u_val+dir_u));
+					//printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
+				
+					printf("%ld \t %ld \t %d \t %f \t %f \t %f \t %f \t (%f,%f)\n",i,l,k,precip_val,profit_value,pos_row,pos_col,v_val,u_val);
+				}
+				else {
+					//Goes back to the original starting hour for the bird; i.e 7pm
+					// 6-k because l++ will not be done in the end because it breaks from the loop
+					l += (6-k);
+					printf("Skipped Wind (%f,%f) @ (%f,%f)w_profit = %f,precip=%f,And l = %ld\n",u_val,v_val,pos_row,pos_col,profit_value,precip_val,l);
+					break;
+				}
+				fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
+			}
+		}
+		
+		//v10 and u10 profit values were too low
+		if(l_old == l){
+			printf("u10 v10 profit value too low!\n");
+			l+=6;
+
+		}
 		for(k=1; (l_old < l) && (k<=REGRESSION_HRS); l_old++,k++){
 
 			//printf("\nPressure Sum Interpolation\n");
@@ -763,6 +899,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		l_old = l;
 		//printf("Running\n");
 		printf("-----------------------------------------------------------------------------------------------------------------------\n");
+
 	}
 }
 
