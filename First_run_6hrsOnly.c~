@@ -3,11 +3,12 @@
 #include <stdio.h>
 #include <math.h>
 #include <float.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
+//#include <cuda.h>
+//#include <cuda_runtime.h>
 #include <string.h>
 #include <stdlib.h>
-#include <GL/glut.h>
+
+//#include <GL/glut.h>
 
 #define PI 3.14159
 #define LONG_SIZE	429
@@ -64,9 +65,9 @@ float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSi
 int main()
 {
 	size_t limit;
-	cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 500 * 1024 * 1024);
-	cudaDeviceSetLimit(cudaLimitMallocHeapSize, 128*1024*1024);
-	cudaDeviceGetLimit(&limit,cudaLimitPrintfFifoSize);
+	//cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 500 * 1024 * 1024);
+	//cudaDeviceSetLimit(cudaLimitMallocHeapSize, 128*1024*1024);
+	//cudaDeviceGetLimit(&limit,cudaLimitPrintfFifoSize);
 	//The wind data is in m/s
 	float* udata;
 	udata = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
@@ -93,8 +94,8 @@ int main()
 		return -1;
 	}
 	FILE *vdataTxt,*udataTxt;
-	udataTxt = fopen("../Birds_data/U850_30days_Sept_2011.txt","r");
-	vdataTxt = fopen("../Birds_data/V850_30days_Sept_2011.txt","r");
+	udataTxt = fopen("../Birds_data/output/U850_30days_Sept_2011.txt","r");
+	vdataTxt = fopen("../Birds_data/output/V850_30days_Sept_2011.txt","r");
 	if(udataTxt == NULL) {
 		perror("Cannot open file with U850 data\n");
 		return -1;
@@ -107,8 +108,8 @@ int main()
 	//Birds will check the wind at the surface therefore the u and v
 	//at 10m is required
 	FILE *v10dataTxt,*u10dataTxt;
-	u10dataTxt = fopen("../Birds_data/U10_30days_Sept_2011.txt","r");
-	v10dataTxt = fopen("../Birds_data/V10_30days_Sept_2011.txt","r");
+	u10dataTxt = fopen("../Birds_data/output/U10_30days_Sept_2011.txt","r");
+	v10dataTxt = fopen("../Birds_data/output/V10_30days_Sept_2011.txt","r");
 	if(u10dataTxt == NULL) {
 		perror("Cannot open file with U10 data\n");
 		return -1;
@@ -119,19 +120,19 @@ int main()
 	}
 
 	FILE* dirTxt;
-	dirTxt = fopen("extP_crop.txt","r");
+	dirTxt = fopen("ext_crop.txt","r");
 	if(dirTxt == NULL) {
 		perror("Cannot open file with direction data\n");
 		return -1;
 	}
 	FILE* precipTxt;
-	precipTxt = fopen("../Birds_data/PRCP_30days_Sept_2011.txt","r");
+	precipTxt = fopen("../Birds_data/output/PRCP_30days_Sept_2011.txt","r");
 	if(precipTxt == NULL) {
 		perror("Cannot open file with PRCP data\n");
 		return -1;
 	}
 	FILE* pressureTxt;
-	pressureTxt = fopen("../Birds_data/MSLP_30days_Sept_2011.txt","r");
+	pressureTxt = fopen("../Birds_data/output/MSLP_30days_Sept_2011.txt","r");
 	if(pressureTxt == NULL) {
 		perror("Cannot open file with pressure data!\n");
 		return -1;
@@ -468,13 +469,13 @@ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_
 	tailComponent = 0;
 
 	magnitude_squared = u_val * u_val + v_val * v_val;
-	magnitude = (float)sqrt(magnitude_squared);
+	magnitude = (float)sqrtf(magnitude_squared);
 
 
 	//Getting the tail component of the wind; or the component of the wind in the desired direction of flight
 	//From formula of getting the vector projection of wind onto the desired direction
 	tailComponent = (dir_v * v_val + dir_u * u_val);
-	tailComponent = tailComponent/sqrt(u_val*u_val + v_val*v_val);
+	tailComponent = tailComponent/sqrtf(u_val*u_val + v_val*v_val);
 	//Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds
 
 
@@ -537,13 +538,13 @@ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_
 		if(diffAngle > 180) diffAngle = 360 - diffAngle;
 		if(diffAngle > 360) diffAngle = diffAngle - 360;
 		profit_value = (DESIRED_SPEED * DESIRED_SPEED) + magnitude_squared - 2 * DESIRED_SPEED * magnitude * cos(diffAngle * PI/180);
-		profit_value = DESIRED_SPEED - (float)sqrt(profit_value);
+		profit_value = DESIRED_SPEED - (float)sqrtf(profit_value);
 	}
 	else {
 		vectAngle = (dir_v * v_val + dir_u * u_val);
-		vectAngle = acos(vectAngle / sqrt((u_val*u_val + v_val* v_val)*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);
+		vectAngle = acos(vectAngle / sqrtf((u_val*u_val + v_val* v_val)*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);
 		vectAngle = (vectAngle <= 90)? 90 - vectAngle: vectAngle - 90;
-		crossComponent = sqrt(u_val*u_val + v_val*v_val)/cos(vectAngle);
+		crossComponent = sqrtf(u_val*u_val + v_val*v_val)/cos(vectAngle);
 		//Getting the absolute value
 		crossComponent = (crossComponent<0)? crossComponent * (-1):crossComponent;
 		profit_value = tailComponent - crossComponent;
@@ -756,7 +757,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 					pos_col = pos_col + (u_val + dir_u)*0.36;
 
 					float tmp;
-					tmp = sqrt((v_val+dir_v)*(v_val+dir_v) + (u_val+dir_u)*(u_val+dir_u));
+					tmp = sqrtf((v_val+dir_v)*(v_val+dir_v) + (u_val+dir_u)*(u_val+dir_u));
 					//printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
 				
 					printf("%ld \t %ld \t %d \t %f \t %f \t %f \t %f \t (%f,%f)\n",i,l,k,precip_val,profit_value,pos_row,pos_col,v_val,u_val);
@@ -766,12 +767,11 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 					// 6-k because l++ will not be done in the end because it breaks from the loop
 					l += (6-k);
 					
-					//Every day has 6 time steps and this line skips the total desired number of days
-					l += STOPOVER_DAYS * 6;
+					
 					printf("Skipped Wind (%f,%f) @ (%f,%f)w_profit = %f,precip=%f,And l = %ld\n",u_val,v_val,pos_row,pos_col,profit_value,precip_val,l);
 					break;
 				}
-				fprintf(outTxt,"%f,%f,%f,%f\n",pos_row,pos_col,u_val,v_val);
+				fprintf(outTxt,"%ld,%f,%f\n",l,pos_row,pos_col);
 			}
 		}
 		
@@ -781,8 +781,11 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 			l+=6;
 
 		}
-	
+		//Every day has 6 time steps and this line skips the total desired number of days
+		l += STOPOVER_DAYS * 6;
 		l_old = l - REGRESSION_HRS;
+
+		printf("check l %ld\n",l);
 
 		//Taking the pressure from 6 hours earlier of the location where the bird landed
 		for(k=1; (l_old < l) && (k<=REGRESSION_HRS); l_old++,k++){

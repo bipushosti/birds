@@ -13,13 +13,14 @@
 #define LONG_SIZE	429
 #define LAT_SIZE	429
 #define LINESIZE	15*LAT_SIZE+LAT_SIZE - 3
-#define TIMESTEPS	10*6
+#define TIMESTEPS	30*6
 #define SKIP_TIMESTEPS	0
 //#define DESIRED_ROW
 //#define DESIRED_COL
 #define STARTING_ROW	150.0
 #define STARTING_COL	150.0
 
+#define STOPOVER_DAYS	0
 
 //#define DESIRED_SPEED	3.6		//Birds want to travel at 10m/s, it is 36km/hr(in the grid it is 3.6 units per hour) 
 #define DESIRED_SPEED	10
@@ -92,8 +93,8 @@ int main()
 		return -1;
 	}
 	FILE *vdataTxt,*udataTxt;
-	udataTxt = fopen("../Birds_data/full_U850_text_first10_2009.txt","r");
-	vdataTxt = fopen("../Birds_data/full_V850_text_first10_2009.txt","r");
+	udataTxt = fopen("../Birds_data/U850_30days_Sept_2011.txt","r");
+	vdataTxt = fopen("../Birds_data/V850_30days_Sept_2011.txt","r");
 	if(udataTxt == NULL) {
 		perror("Cannot open file with U850 data\n");
 		return -1;
@@ -106,8 +107,8 @@ int main()
 	//Birds will check the wind at the surface therefore the u and v
 	//at 10m is required
 	FILE *v10dataTxt,*u10dataTxt;
-	u10dataTxt = fopen("../Birds_data/full_U10_text_first10_2009.txt","r");
-	v10dataTxt = fopen("../Birds_data/full_V10_text_first10_2009.txt","r");
+	u10dataTxt = fopen("../Birds_data/U10_30days_Sept_2011.txt","r");
+	v10dataTxt = fopen("../Birds_data/V10_30days_Sept_2011.txt","r");
 	if(u10dataTxt == NULL) {
 		perror("Cannot open file with U10 data\n");
 		return -1;
@@ -124,13 +125,13 @@ int main()
 		return -1;
 	}
 	FILE* precipTxt;
-	precipTxt = fopen("../Birds_data/full_PRCP_text_first10_2009.txt","r");
+	precipTxt = fopen("../Birds_data/PRCP_30days_Sept_2011.txt","r");
 	if(precipTxt == NULL) {
 		perror("Cannot open file with PRCP data\n");
 		return -1;
 	}
 	FILE* pressureTxt;
-	pressureTxt = fopen("../Birds_data/full_MSLP_text_first10_2009.txt","r");
+	pressureTxt = fopen("../Birds_data/MSLP_30days_Sept_2011.txt","r");
 	if(pressureTxt == NULL) {
 		perror("Cannot open file with pressure data!\n");
 		return -1;
@@ -695,7 +696,11 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 
 		printf("10 profit value::%f\n",getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v));
 		printf("pressure value::%f,slope value::%f\n",last_pressure,slope);
-		if((getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v) >= MIN_PROFIT) && (last_pressure>=1009)&&(slope >-1)){
+
+
+
+
+		if((getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v) >= MIN_PROFIT) && ((last_pressure>=1009)||(slope >-1))){
 			
 
 			for(k=0;k<6;k++,l++ ) {
@@ -730,10 +735,9 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 
 
 				//Bilinear interpolation for u and v data
-				//printf("\n U850 Interpolation\n");
-				u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);
-				//printf("\n V850 Interpolation\n");
+				u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
 				v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
+
 				printf("(u_val,v_val)::(%f,%f)\n",u_val,v_val);
 
 				profit_value = getProfitValue(u_val,v_val,actualAngle,dir_u,dir_v);
@@ -758,13 +762,16 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 					printf("%ld \t %ld \t %d \t %f \t %f \t %f \t %f \t (%f,%f)\n",i,l,k,precip_val,profit_value,pos_row,pos_col,v_val,u_val);
 				}
 				else {
-					//Goes back to the original starting hour for the bird; i.e 7pm
+					//l increases but it goes back to the original starting hour for the bird; i.e 7pm
 					// 6-k because l++ will not be done in the end because it breaks from the loop
 					l += (6-k);
+					
+					//Every day has 6 time steps and this line skips the total desired number of days
+					l += STOPOVER_DAYS * 6;
 					printf("Skipped Wind (%f,%f) @ (%f,%f)w_profit = %f,precip=%f,And l = %ld\n",u_val,v_val,pos_row,pos_col,profit_value,precip_val,l);
 					break;
 				}
-				fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
+				fprintf(outTxt,"%f,%f,%f,%f\n",pos_row,pos_col,u_val,v_val);
 			}
 		}
 		
@@ -774,6 +781,10 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 			l+=6;
 
 		}
+	
+		l_old = l - REGRESSION_HRS;
+
+		//Taking the pressure from 6 hours earlier of the location where the bird landed
 		for(k=1; (l_old < l) && (k<=REGRESSION_HRS); l_old++,k++){
 
 			//printf("\nPressure Sum Interpolation\n");
@@ -783,8 +794,6 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 			//printf("%f\n",pressureData[skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col]);
 
 			if(k == REGRESSION_HRS) {
-				//last_pressure = pressureData[skip_size + l_old * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col];
-				//printf("\n Last Pressure Interpolation\n");
 				last_pressure = bilinear_interpolation(pos_col,pos_row,pressureData,l_old,1);
 			}
 		}
@@ -808,7 +817,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		//Since the data now does not contain all 24 hours but just 7pm to 1am
 		//l += 6;
 		i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
-		l_old = l;
+		//l_old = l;
 		//printf("Running\n");
 		printf("-----------------------------------------------------------------------------------------------------------------------\n");
 

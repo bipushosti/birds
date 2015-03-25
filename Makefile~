@@ -4,7 +4,7 @@ TARGET=birds
 OBJS=First_run_6hrsOnly.cu
 
 LDFLAGS = -g -lGL -lGLU -lglut
-NVCC = nvcc
+NVCC=nvcc
 
 all:${TARGET}
 
