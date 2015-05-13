@@ -7,7 +7,6 @@
 //#include <cuda_runtime.h>
 #include <string.h>
 #include <stdlib.h>
-#include <gsl/gsl_math.h>
 
 //#include <GL/glut.h>
 
@@ -19,15 +18,15 @@
 #define SKIP_TIMESTEPS	0
 //#define DESIRED_ROW
 //#define DESIRED_COL
-#define STARTING_ROW	110.0
-#define STARTING_COL	150.0
+
 
 #define STOPOVER_DAYS	0
 
 //#define DESIRED_SPEED	3.6		//Birds want to travel at 10m/s, it is 36km/hr(in the grid it is 3.6 units per hour) 
-#define DESIRED_FLIGHTSPEED		5	//How fast bird is flying when no wind
-#define DESIRED_SPEED			10	//Air speed; Desired speed = flightspeed + windspeed ; Only used in windprofit calculation
+#define DESIRED_SPEED	10
 
+#define STARTING_ROW	110
+#define STARTING_COL	150
 	
 #define MIN_PROFIT	-7
 //Defining the x-variable size, it's sum and
@@ -60,76 +59,26 @@ Year = 2009
 Precipitation = millimeters
 */
 
-float rows[11]={140,141,142,143,144,145,146,147,148,149,150};
-float cols[11]={150,151,152,153,154,155,156,157,158,159,160};
+//float rows[11]={140,141,142,143,144,145,146,147,148,149,150};
+//float cols[11]={150,151,152,153,154,155,156,157,158,159,160};
 
-//float rows[11]={100,99,98,97,96,95,94,93,92,91,90};
-//float cols[11]={250,250,250,250,250,250,250,250,250,250,250};
+float rows[11]={100,99,98,97,96,95,94,93,92,91,90};
+float cols[11]={250,250,250,250,250,250,250,250,250,250,250};
 
 long int starting_l = 0;
 //--------------------------------------------------------------------------------------------------------------------------
 void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData,float* precipData,float* pressureData,float* u10data,float* v10data);
 float getProfitValue(float u,float v,float dirVal,float dir_u,float dir_v);
 float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSize);
-//double rvm (double mean, double k);
 //--------------------------------------------------------------------------------------------------------------------------
-
-/*
-double rvm (double mean, double k) 
-{
-	//init_rng(&rng);
-    double result = 0.0;
-
-    double a = 1.0 + sqrt(1 + 4.0 * (k * k));
-    double b = (a - sqrt(2.0 * a))/(2.0 * k);
-    double r = (1.0 + b * b)/(2.0 * b);
-
-    while (1)
-    {
-	double U1 = gsl_ran_flat(rng, 0.0, 1.0);
-	double z = cos(M_PI * U1);
-	double f = (1.0 + r * z)/(r + z);
-	double c = k * (r - f);
-	double U2 = gsl_ran_flat(rng, 0.0, 1.0);
-	
-	if (c * (2.0 - c) - U2 > 0.0) 
-	{
-	    double U3 = gsl_ran_flat(rng, 0.0, 1.0);
-	    double sign = 0.0;
-	    if (U3 - 0.5 < 0.0)
-		sign = -1.0;
-	    if (U3 - 0.5 > 0.0)
-		sign = 1.0;
-	    result = sign * acos(f) + mean;
-	    while (result >= 2.0 * M_PI)
-		result -= 2.0 * M_PI;
-	    break;
-	}
-	else 
-	{
-	    if(log(c/U2) + 1.0 - c >= 0.0) 
-	    {
-		double U3 = gsl_ran_flat(rng, 0.0, 1.0);
-		double sign = 0.0;
-		if (U3 - 0.5 < 0.0)
-		    sign = -1.0;
-		if (U3 - 0.5 > 0.0)
-		    sign = 1.0;
-		result = sign * acos(f) + mean;
-		while (result >= 2.0 * M_PI)
-		    result -= 2.0 * M_PI;
-		break;
-	    }
-	}
-    }
-del_rng(rng);
-    return result;
-}
-
-*/
 int main()
 {
 
+
+	size_t limit;
+	//cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 500 * 1024 * 1024);
+	//cudaDeviceSetLimit(cudaLimitMallocHeapSize, 128*1024*1024);
+	//cudaDeviceGetLimit(&limit,cudaLimitPrintfFifoSize);
 	//The wind data is in m/s
 	float* udata;
 	udata = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
@@ -150,7 +99,7 @@ int main()
 	dirData = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
 
 	FILE *posdataTxt;
-	posdataTxt = fopen("posdata.txt","w");
+	posdataTxt = fopen("posdata_NULL.txt","w");
 	if(posdataTxt == NULL) {
 		perror("Cannot open udataTxt file\n");
 		return -1;
@@ -182,7 +131,7 @@ int main()
 	}
 
 	FILE* dirTxt;
-	dirTxt = fopen("ext_crop.txt","r");
+	dirTxt = fopen("extP_crop.txt","r");
 	if(dirTxt == NULL) {
 		perror("Cannot open file with direction data\n");
 		return -1;
@@ -439,6 +388,65 @@ int main()
 	//}
 
 
+	/*
+	float resultantMatrix[LONG_SIZE * LAT_SIZE];
+	float resultantAngle[LONG_SIZE * LAT_SIZE];
+	resultantMatrix[LAT_SIZE * LONG_SIZE -1] = 834.0;
+	float *udataPtr,*vdataPtr,*resultantMatrixPtr,*resultantAnglePtr;
+	cudaMalloc((void**)&udataPtr,LONG_SIZE * LAT_SIZE * sizeof(float));
+	cudaMemcpy(udataPtr,udata,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
+	cudaMalloc((void**)&vdataPtr,LONG_SIZE * LAT_SIZE * sizeof(float));
+	cudaMemcpy(vdataPtr,vdata,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
+	cudaMalloc((void**)&resultantMatrixPtr,LONG_SIZE * LAT_SIZE * sizeof(float));
+	cudaMalloc((void**)&resultantAnglePtr,LONG_SIZE * LAT_SIZE * sizeof(float));
+	cudaMemcpy(vdataPtr,vdata,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
+	dim3 gridSize(1,LONG_SIZE,1);
+	dim3 blockSize((LAT_SIZE/32 +1)*32 ,1,1);
+	printf("Hello2\n");
+	get_resultant<<<gridSize,blockSize>>>(udataPtr,vdataPtr,resultantMatrixPtr,resultantAnglePtr);
+	printf("Hello3\n");
+	cudaDeviceSynchronize();
+	cudaError_t error = cudaGetLastError();
+	if(error != cudaSuccess)
+	{
+	printf("CUDA Error: %s\n", cudaGetErrorString(error));
+	// we can't recover from the error -- exit the program
+	return 0;
+	}
+	cudaMemcpy(resultantMatrix,resultantMatrixPtr,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyDeviceToHost);
+	cudaMemcpy(resultantAngle,resultantAnglePtr,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyDeviceToHost);
+	cudaFree(udataPtr);
+	cudaFree(vdataPtr);
+	cudaFree(resultantMatrixPtr);
+	cudaFree(resultantAnglePtr);
+	printf("U v Magnitude Angle\n");
+	for(j=0;j<LAT_SIZE*LONG_SIZE;j++) {
+	printf("%f,%f,%f,%f\n",udata[j],vdata[j],resultantMatrix[j],resultantAngle[j]);
+	}
+	printf("(5,5)::%f,%f",udata[5 * LAT_SIZE + 5],vdata[5 * LAT_SIZE + 5]);
+	get_movementData(posdataTxt,resultantMatrix,resultantAngle,udata,vdata);
+	*/
+	//--------------------------------------------------------------------------------------------------------------------------
+	/*int coords_row[TIMESTEPS];
+	int coords_col[TIMESTEPS];
+	int *coords_rowPtr,*coords_colPtr;
+	cudaMalloc((void**)&coords_rowPtr,TIMESTEPS * sizeof(int));
+	cudaMalloc((void**)&coords_colPtr,TIMESTEPS * sizeof(int));
+	cudaMalloc((void**)&resultantMatrixPtr,LONG_SIZE * LAT_SIZE * sizeof(float));
+	cudaMalloc((void**)&resultantAnglePtr,LONG_SIZE * LAT_SIZE * sizeof(float));
+	cudaMemcpy(resultantMatrixPtr,resultantMatrix,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
+	cudaMemcpy(resultantAnglePtr,resultantAngle,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
+	dim3 gridSize2(1,0,0);
+	dim3 blockSize2(1,0,0);
+	bird_thread<<<gridSize2,blockSize2>>>(resultantMatrix,resultantAngle,coords_row,coords_col);
+	cudaMemcpy(coords_row,coords_rowPtr,TIMESTEPS * sizeof(int),cudaMemcpyDeviceToHost);
+	cudaMemcpy(coords_row,coords_colPtr,TIMESTEPS * sizeof(int),cudaMemcpyDeviceToHost);
+	cudaFree(coords_rowPtr);
+	cudaFree(coords_colPtr);
+	cudaFree(resultantMatrixPtr);
+	cudaFree(resultantAnglePtr);
+	//printf("%d,%d\n",coords_row[0],coords_col[0]);
+	*/
 
 
 	free(udata);
@@ -632,14 +640,6 @@ float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSi
 //Main part of the function
 void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, float* precipData,float* pressureData,float* u10data,float* v10data)
 {
-	fprintf(outTxt,"pos_row \t pos_col \t u_val \t\t v_val \t\t dir_u \t\t dir_v \t\t u_air \t\t v_air \t\t bird_AirSpeed \t wind_Speed \t\t distance \t l \t skip\n");
-	float distance,prev_row,prev_col,bird_AirSpeed,wind_Speed;
-	distance = 0;
-	bird_AirSpeed = 0;
-	wind_Speed = 0;
-	prev_row = STARTING_ROW;
-	prev_col = STARTING_COL;
-
 	float pos_row,pos_col;
 	//pos_row = LONG_SIZE - STARTING_ROW;
 	pos_row = STARTING_ROW;
@@ -653,8 +653,8 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 	pressure_sum = 0;
 	slope = 1;
 	last_pressure = 1011;
-	l = 18;
-	l_old = 18;
+	l = 0;
+	l_old = 0;
 	float profit_value,dirAngle,actualAngle;
 
 	
@@ -664,8 +664,6 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 	
 
 	float u_val,v_val,precip_val,v_ten,u_ten;
-	int skip;
-	skip=0;
 	//skip_size = 120174
 	
 	//fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
@@ -725,20 +723,20 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 
 			for(k=0;k<6;k++,l++ ) {
 				i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
-				skip = 0;
-
+			
 				//dirAngle is with respect to North or the positive y-axis
+				//dirAngle is the desired angle the bird wants to fly in 
 				dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
 				actualAngle = dirAngle;
 
 				//The grid is upside down; y increases from top to bottom while x increases from left to right 
 				//dir_v and dir_u are the x and y components of the wind (v=y,u=x)
-				if(dirAngle <= 90){//Checked OK
+				if(dirAngle <= 90){
 					dirAngle = 90 - dirAngle;
 					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
 					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
 				}
-				else if((dirAngle > 90) && (dirAngle <= 180)){//Checked OK
+				else if((dirAngle > 90) && (dirAngle <= 180)){
 					dirAngle -= 90;
 					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
 					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
@@ -773,36 +771,29 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 					//Positon is in a 10 km grid. This means for 1m/s, the 
 					//position change in 1 hour is 3.6/10 = 0.36units in the grid
 	//				pos_row = pos_row + (v_val + dir_v)*0.36;
-					pos_row = pos_row + (v_val + dir_v)*0.36*-1;
-					pos_col = pos_col + (u_val + dir_u)*0.36;
+					//pos_row = pos_row - (v_val + dir_v)*0.36;
+					//pos_col = pos_col + (u_val + dir_u)*0.36;
+
+					pos_row = pos_row - (v_val)*0.36;
+					pos_col = pos_col + (u_val)*0.36;
 
 					//float tmp;
 					//tmp = sqrtf((v_val+dir_v)*(v_val+dir_v) + (u_val+dir_u)*(u_val+dir_u));
 					//printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
 				
 					printf("%ld \t %ld \t %d \t %f \t %f \t %f \t %f \t (%f,%f)\n",i,l,k,precip_val,profit_value,pos_row,pos_col,v_val,u_val);
-					skip = 0;
 				}
 				else {
 					//l increases but it goes back to the original starting hour for the bird; i.e 7pm
 					// 6-k because l++ will not be done in the end because it breaks from the loop
 					l += (6-k);
-					skip = 1;
+					
 					
 					printf("Skipped Wind (%f,%f) @ (%f,%f)w_profit = %f,precip=%f,And l = %ld\n",u_val,v_val,pos_row,pos_col,profit_value,precip_val,l);
 					break;
 				}
-				//fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
-				distance = sqrt((pos_row - prev_row)*(pos_row - prev_row) + (pos_col - prev_col)*(pos_col - prev_col));
-				prev_col = pos_col;
-				prev_row = pos_row;
-		
-				wind_Speed = sqrt(u_val * u_val + v_val * v_val);
-				bird_AirSpeed = sqrt((u_val+dir_u)*(u_val+dir_u) +(v_val+dir_v)*(v_val+dir_v));
-				//Distance is in absolute value (kilometers rather than in units of grid points)
-				fprintf(outTxt,"%f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %ld \t %d\n",pos_row,pos_col,u_val,v_val,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,skip);
-				
-				
+				fprintf(outTxt,"%f,%f\t%f,%f,%ld\n",pos_row,pos_col,u_val,v_val,l);
+				//fprintf(outTxt,"%f,%f\n",u_val,v_val);
 			}
 		}
 		
