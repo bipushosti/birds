@@ -14,8 +14,10 @@ http://www.unidata.ucar.edu/software/netcdf/docs/netcdf-c
 
 $Id: simple_xy_rd.c,v 1.9 2006/08/17 23:00:55 russ Exp $
 */
+#include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <netcdf.h>
 
 /* This is the name of the data file we will read. */
@@ -34,15 +36,92 @@ $Id: simple_xy_rd.c,v 1.9 2006/08/17 23:00:55 russ Exp $
 #define ERRCODE 2
 #define ERR(e) {printf("Error: %s\n", nc_strerror(e)); exit(ERRCODE);}
 
-int main()
+
+
+//------------------------------------------------------------------------------------------------------------------//
+					//Function Definitions//
+
+int count_days(char *fileName);
+char * convert_to_month(char* month,char* year);
+char* yearMonth_lookupTable(char* month,char* year);
+//------------------------------------------------------------------------------------------------------------------//
+					//Functions//
+
+int count_days(char *fileName)
 {
+	FILE * days_file;
+	days_file = fopen(fileName,"r");
+	int total_files,tmp;
+	total_files = 0;
+	printf("Filename %s\n",fileName);
+	do{
+		tmp = fgetc(days_file);
+		if(tmp == '\n') total_files++;
+	}while(tmp != EOF);
+
+	fclose(days_file);
+	return total_files;
+}
+
+char * convert_to_month(char* month,char* year)
+{
+	char* ret_month;
+	if((strcmp(month,"8")==0)||(strcmp(month,"08")==0)){
+		ret_month = "August";
+	}else if((strcmp(month,"9")==0)||(strcmp(month,"09")==0)){
+		ret_month = "September";
+	}else if(strcmp(month,"10")==0){
+		ret_month = "September";
+	}else if(strcmp(month,"11")==0){
+		ret_month = "September";
+	}else{
+		printf("\n\t\tIncorrect month used\n\t\tUse between August-November inclusive; only use respective numbers eg August = 08 or 8\n");
+		return 0;
+	}
+}
+
+char* yearMonth_lookupTable(char* month,char* year)
+{
+	char* filename,*month_full;
+	
+	if(strcmp(year,"2008")){
+		month_full = convert_to_month(month,year);
+	}else if(strcmp(year,"2009")){
+		month_full = convert_to_month(month,year);
+	}else if(strcmp(year,"2010")){
+		month_full = convert_to_month(month,year);
+	}else if(strcmp(year,"2012")){
+		month_full = convert_to_month(month,year);
+	}else{
+		printf("\n\t\tIncorrect year used\n\t\tUse between 2008-2013 inclusive; only use full format eg 2013,2012\n");
+		return 0;
+	}
+		
+
+
+}
+//------------------------------------------------------------------------------------------------------------------//
+
+
+int main(int argc,char* argv[])
+{
+	char *command[]= {"/bin/bash","-c","/bin/ls ~/Documents/Birds_Full/Birds_data/output/MSLP/CFSR_NA-East_10km_MSLP_2008-08-*.nc > InputFiles_August2008.txt",NULL};
+	execvp(command[0],command);
+	if(argc == 1){
+		printf("\n\tNot enough arguments\n\tUsage:\tExecutable Year StartMonth EndMonth\n");
+		return 0;
+	}
+	printf("Days: %d\n",count_days("InputFiles_August2008.txt"));
 /* This will be the netCDF ID for the file and data variable. */
 	int ncid, varid,i,rec,mslp_varid;
 
-	float XLAT[NX][NY],XLONG[NX][NY],MSLP[NX][NY];
+	float XLAT[NX][NY],XLONG[NX][NY],MSLP_tmp[NX][NY],*MSLP;
 	size_t start[NDIMS],count[NDIMS];
 	/* Loop indexes, and error handling. */
 	int x, y, retval;
+
+	MSLP = (float*)malloc(NX * NY * NZ * sizeof(float));
+
 
 	/* Open the file. NC_NOWRITE tells netCDF we want read-only access
 	* to the file.*/
@@ -76,7 +155,7 @@ int main()
 		ERR(retval);
 	}
 
-	/* Read the data. */
+	/* Read the data. No idea why this is needed*/
 	count[0] = 1;
 	count[1] = NX;
 	count[2] = NY;
@@ -87,16 +166,27 @@ int main()
 	int j,k;
 	for(rec = 0;rec < NREC;rec++){
 		start[0] = rec;
-		if((retval = nc_get_vara_float(ncid,mslp_varid,start,count,&MSLP[0][0]))){
+		if((retval = nc_get_vara_float(ncid,mslp_varid,start,count,&MSLP_tmp[0][0]))){
 			ERR(retval);
 		}
+//		printf("Size = %ld\n",sizeof(MSLP)/sizeof(float));
+		//printf("%f\n",MSLP_tmp[0][0]);
 
-		for(i=0;i<NX;i++){
-			for(j=0;j<NY;j++){
-				printf("%f ",MSLP[i][j]);
+//		return 0;
+
+//		for(k=0;k<NZ;k++){
+			for(i=0;i<NY;i++){
+				for(j=0;j<NX;j++){
+					//This order gives the correct result
+					//printf("%f ",MSLP_tmp[j][i]);
+					MSLP[i*NX*NZ+j*NZ+rec] = MSLP_tmp[j][i];
+					//printf("%f ",MSLP[i*NX*NZ+j*NZ+rec]);
+				}
+				//printf("\n");
 			}
-			printf("\n");
-		}
+//		}
+		
+//		return 0;
 	}
 
 	if(retval = nc_close(ncid)){
@@ -105,7 +195,7 @@ int main()
 
 	
 	
-	
+	free(MSLP);
 	return 0;
 }
 
