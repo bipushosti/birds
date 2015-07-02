@@ -1,35 +1,41 @@
 
 
-#include <stdio.h>
+
 #include <math.h>
 #include <float.h>
 //#include <cuda.h>
 //#include <cuda_runtime.h>
 #include <string.h>
+#include <time.h>
+#include <sys/time.h>
 #include <stdlib.h>
+#include <stdio.h>
 #include <gsl/gsl_math.h>
 
 //#include <GL/glut.h>
 
-#define PI 3.14159
-#define LONG_SIZE	429
-#define LAT_SIZE	429
-#define LINESIZE	15*LAT_SIZE+LAT_SIZE - 3
-#define TIMESTEPS	30*6
-#define SKIP_TIMESTEPS	0
+#define PI 			3.14159
+#define LONG_SIZE		429
+#define LAT_SIZE		429
+#define LINESIZE		15*LAT_SIZE+LAT_SIZE - 3
+#define TIMESTEPS		30*6
+#define SKIP_TIMESTEPS		0
 //#define DESIRED_ROW
 //#define DESIRED_COL
-#define STARTING_ROW	110.0
-#define STARTING_COL	150.0
+#define STARTING_ROW		110.0
+#define STARTING_COL		150.0
 
-#define STOPOVER_DAYS	0
+#define STOPOVER_DAYS		0
 
 //#define DESIRED_SPEED	3.6		//Birds want to travel at 10m/s, it is 36km/hr(in the grid it is 3.6 units per hour) 
-#define DESIRED_FLIGHTSPEED		5	//How fast bird is flying when no wind
-#define DESIRED_SPEED			10	//Air speed; Desired speed = flightspeed + windspeed ; Only used in windprofit calculation
-
 	
-#define MIN_PROFIT	-7
+#define DESIRED_SPEED		10.5	//Air speed; Desired speed = flightspeed + windspeed ; Only used in windprofit calculation
+
+#define STD_BIRDANGLE		5	//Standard deviation * 6 = the total difference from max to min angle possible
+					//If STD_BIRDANGLE = 10 then the angle can differ +- (10*6)/2 = +- 30 from mean
+#define	glCompAcc		1e-8	//If the difference is equal to or less than this then equal
+
+#define MIN_PROFIT		-7
 //Defining the x-variable size, it's sum and
 //sum of squares as needed for slope calculation
 
@@ -40,15 +46,15 @@
 //for each take off time(6pm or 7pm) instead of including all the pressure data files.
 //This helps in reducing the size of the data.
 
-#define REGRESSION_HRS	6
+#define REGRESSION_HRS		6
 
 //Precipitation (mm/hr) below which birds can fly
-#define MAX_PRECIP	2
+#define MAX_PRECIP		2
 
 //HRS_SUM = sum(1 to 12) before. Now has to be sum(1 to 6) = 21
-#define HRS_SUM	21
-#define HRS_SQUARE_SUM	91
-#define DENOM_SLOPE	(REGRESSION_HRS * HRS_SQUARE_SUM)-(HRS_SUM * HRS_SUM)
+#define HRS_SUM			21
+#define HRS_SQUARE_SUM		91
+#define DENOM_SLOPE		(REGRESSION_HRS * HRS_SQUARE_SUM)-(HRS_SUM * HRS_SUM)
 // Barometric pressure
 // Bird finds the pressure at the time it leaves and compares it with the data from
 // the previous day.
@@ -71,65 +77,13 @@ long int starting_l = 0;
 void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData,float* precipData,float* pressureData,float* u10data,float* v10data);
 float getProfitValue(float u,float v,float dirVal,float dir_u,float dir_v);
 float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSize);
-//double rvm (double mean, double k);
+float WrappedNormal (float MeanAngle,float AngStdDev);
 //--------------------------------------------------------------------------------------------------------------------------
-
-/*
-double rvm (double mean, double k) 
-{
-	//init_rng(&rng);
-    double result = 0.0;
-
-    double a = 1.0 + sqrt(1 + 4.0 * (k * k));
-    double b = (a - sqrt(2.0 * a))/(2.0 * k);
-    double r = (1.0 + b * b)/(2.0 * b);
-
-    while (1)
-    {
-	double U1 = gsl_ran_flat(rng, 0.0, 1.0);
-	double z = cos(M_PI * U1);
-	double f = (1.0 + r * z)/(r + z);
-	double c = k * (r - f);
-	double U2 = gsl_ran_flat(rng, 0.0, 1.0);
-	
-	if (c * (2.0 - c) - U2 > 0.0) 
-	{
-	    double U3 = gsl_ran_flat(rng, 0.0, 1.0);
-	    double sign = 0.0;
-	    if (U3 - 0.5 < 0.0)
-		sign = -1.0;
-	    if (U3 - 0.5 > 0.0)
-		sign = 1.0;
-	    result = sign * acos(f) + mean;
-	    while (result >= 2.0 * M_PI)
-		result -= 2.0 * M_PI;
-	    break;
-	}
-	else 
-	{
-	    if(log(c/U2) + 1.0 - c >= 0.0) 
-	    {
-		double U3 = gsl_ran_flat(rng, 0.0, 1.0);
-		double sign = 0.0;
-		if (U3 - 0.5 < 0.0)
-		    sign = -1.0;
-		if (U3 - 0.5 > 0.0)
-		    sign = 1.0;
-		result = sign * acos(f) + mean;
-		while (result >= 2.0 * M_PI)
-		    result -= 2.0 * M_PI;
-		break;
-	    }
-	}
-    }
-del_rng(rng);
-    return result;
-}
-
-*/
 int main()
 {
-
+	struct timeval t1;
+	gettimeofday(&t1,NULL);
+	srand((t1.tv_sec*1000)+(t1.tv_usec/1000));
 	//The wind data is in m/s
 	float* udata;
 	udata = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
@@ -181,12 +135,16 @@ int main()
 		return -1;
 	}
 
+
+//--------------------------Direction file (Example: ext_crop.txt or extP_crop.txt)-----------------------------------//
 	FILE* dirTxt;
-	dirTxt = fopen("ext_crop.txt","r");
+	dirTxt = fopen("extP_cropnew.txt","r");
+	//dirTxt = fopen("ext_crop.txt","r");
 	if(dirTxt == NULL) {
 		perror("Cannot open file with direction data\n");
 		return -1;
 	}
+//--------------------------Direction file code end-------------------------------------------------------------------//
 	FILE* precipTxt;
 	precipTxt = fopen("../Birds_data/output/PRCP_30days_Sept_2011.txt","r");
 	if(precipTxt == NULL) {
@@ -466,10 +424,13 @@ int main()
 	return 0;
 }
 //------------------------------------------------------------------------------------------------------------------------------------
+
 //------------------------------------------------------------------------------------------------------------------------------------
 
 float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v)
 {
+
+	//printf("\n Input DirVal = %f\n",dirVal);
 	//All wind data in m/s
 	float angle,diffAngle,magnitude,magnitude_squared;
 
@@ -627,12 +588,70 @@ float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSi
 	//printf("Q11:%f,Q12:%f,Q21:%f,Q22:%f; And Value=%f\n",Q11,Q12,Q21,Q22,value);
 	return value;
 }
+//-------------------------------------------------------------------------------------------------------------------------------------
+float WrappedNormal (float MeanAngle,float AngStdDev){
 
+	//Fisher 1993 pg. 47-48
+	//s = -2.ln(r)
+
+	float u1,u2,x,z,y;
+	//float wn;
+	u1=0;
+	u2=0;
+
+	while(1){
+		while(1){
+			//Dividing to get values between 0 and 1
+			u1 = (float)rand()/(float)RAND_MAX;
+			u2 = (float)rand()/(float)RAND_MAX;
+			printf("u1:%f,u2:%f\n",u1,u2);
+			if((u1 > 0) && (u2 > 0)) break;
+		}
+
+		//printf("Hello \n");
+
+   		z = 1.715528 * (u1 - 0.5) / u2;
+		//printf("z:%f\n",z);
+
+    		x = 0.25 * z *z;
+		//printf("x:%f\n",x);
+
+		if ((x - (1 - u2)) < glCompAcc) {
+			//check = 0;
+			//continue;
+			//printf("First\n");
+			break;
+			
+		}
+		else if (x - (-log(u2)) < glCompAcc){
+			//check = 0;
+			//continue;
+			//printf("Second\n");
+			break;
+			
+		}
+	}//while(check == 1);
+	
+
+	y = AngStdDev * z + MeanAngle;
+	if ((y - 360) > -glCompAcc){ 
+	    y = y - 360;
+	}
+ 
+	if (y < 0){
+	    y = 360 + y;
+	}
+	
+	//printf("Last \n");
+	return y;
+
+  
+}
 //-------------------------------------------------------------------------------------------------------------------------------------
 //Main part of the function
 void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, float* precipData,float* pressureData,float* u10data,float* v10data)
 {
-	fprintf(outTxt,"pos_row \t pos_col \t u_val \t\t v_val \t\t dir_u \t\t dir_v \t\t u_air \t\t v_air \t\t bird_AirSpeed \t wind_Speed \t\t distance \t l \t skip\n");
+	fprintf(outTxt,"pos_row \t pos_col \t u_val \t\t v_val \t\t dir_u \t\t dir_v \t\t u_air \t\t v_air \t\t bird_GroundSpeed \t wind_Speed \t\t distance \t l \t skip\n");
 	float distance,prev_row,prev_col,bird_AirSpeed,wind_Speed;
 	distance = 0;
 	bird_AirSpeed = 0;
@@ -655,7 +674,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 	last_pressure = 1011;
 	l = 18;
 	l_old = 18;
-	float profit_value,dirAngle,actualAngle;
+	float profit_value,dirAngleFromFile,dirAngle,actualAngle;
 
 	
 	float dir_v,dir_u;
@@ -676,6 +695,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		dir_v = 0;
 		dir_u = 0;
 		dirAngle = 0;
+		dirAngleFromFile = 0;
 		actualAngle = 0;
 		u_val = 0;
 		v_val = 0;
@@ -690,7 +710,10 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 
 		u_ten = bilinear_interpolation(pos_col,pos_row,u10data,l,1);
 		v_ten = bilinear_interpolation(pos_col,pos_row,v10data,l,1);
-		dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+		
+		//The direction angle is chosen only once, before the flight.
+		dirAngleFromFile = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+		dirAngle = WrappedNormal(dirAngleFromFile,STD_BIRDANGLE);
 		actualAngle = dirAngle;
 
 		if(dirAngle <= 90){
@@ -718,19 +741,35 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		printf("pressure value::%f,slope value::%f\n",last_pressure,slope);
 
 
+		dirAngleFromFile = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+		dirAngle = WrappedNormal(dirAngleFromFile,STD_BIRDANGLE);
+		printf("\n First DirectionAngle = %f,AngleFromFile = %f\n",dirAngle,dirAngleFromFile);
+		actualAngle = dirAngle;
+
 
 		//Relation between last_pressure and slope is an OR
 		if((getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v) >= MIN_PROFIT) && ((last_pressure>=1009)||(slope >-1))){
 			
 
+			//dirAngleFromFile = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+			//dirAngle = WrappedNormal(dirAngleFromFile,STD_BIRDANGLE);
+			
+			printf("\n\nl value check: %ld\n\n",l);
+			
 			for(k=0;k<6;k++,l++ ) {
 				i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
 				skip = 0;
 
 				//dirAngle is with respect to North or the positive y-axis
-				dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
-				actualAngle = dirAngle;
+				//It is the genetic direction of the birds
 
+				//actualAngle = dirAngle;
+				//dirAngleFromFile = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+				//dirAngle = WrappedNormal(dirAngleFromFile,STD_BIRDANGLE);
+				
+
+				dirAngle = actualAngle;
+				printf("\n DirectionAngle = %f,AngleFromFile = %f\n",dirAngle,dirAngleFromFile);
 				//The grid is upside down; y increases from top to bottom while x increases from left to right 
 				//dir_v and dir_u are the x and y components of the wind (v=y,u=x)
 				if(dirAngle <= 90){//Checked OK
@@ -800,7 +839,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 				wind_Speed = sqrt(u_val * u_val + v_val * v_val);
 				bird_AirSpeed = sqrt((u_val+dir_u)*(u_val+dir_u) +(v_val+dir_v)*(v_val+dir_v));
 				//Distance is in absolute value (kilometers rather than in units of grid points)
-				fprintf(outTxt,"%f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %ld \t %d\n",pos_row,pos_col,u_val,v_val,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,skip);
+				fprintf(outTxt,"%f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t %f \t%ld\t%d\n",pos_row,pos_col,u_val,v_val,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,skip);
 				
 				
 			}
