@@ -15,6 +15,8 @@ function getNetCDFValues(days)
         output = [];
         out = zeros(429,429,2*days);
         
+        
+        
         l=1;
         for j=1:days
             data=[];

@@ -6,25 +6,111 @@
 #include <float.h>
 #include <string.h>
 #include <time.h>
+#include <sys/time.h>
 #include <stdlib.h>
 #define	glCompAcc	1e-8
 
+
+/*
 struct Values{
 	double meanAngle;
 	double meanConcentration;
 }MeanValues;	
+*/
 
-void CircMeanConcentration(double* ValArray);
+//void CircMeanConcentration(double* ValArray);
 //Attribute VB_Name = "ModCircStats"
 //Option Explicit
-double WrappedNormal (float MeanAngle,float AngStdDev);
+float WrappedNormal (float MeanAngle,float AngStdDev);
 
 int main()
 {
+	struct timeval t1;
+	gettimeofday(&t1,NULL);
+	srand(t1.tv_usec * t1.tv_sec);
 
-	printf("%f\n",WrappedNormal(180.0,15.0));
+	//Standard deviation  = total angular deviation required(+- 30 is 60) / 6
+	float y = 0;
+	y = WrappedNormal(110.0,5.0);
+	printf("%f\n",y);
+	y = 0;
+	printf("------------------------------\n");
+	y = WrappedNormal(110.0,5.0);
+	printf("%f\n",y);
+	printf("------------------------------\n");
+	printf("%f\n",WrappedNormal(110.0,5.0));	
+	printf("------------------------------\n");
+	printf("%f\n",WrappedNormal(110.0,5.0));
+	printf("------------------------------\n");
+	printf("%f\n",WrappedNormal(110.0,5.0));
+	printf("------------------------------\n");
+	printf("%f\n",WrappedNormal(110.0,5.0));
+	printf("------------------------------\n");
+
 	return 0;
 }
+
+
+float WrappedNormal (float MeanAngle,float AngStdDev){
+
+	//Fisher 1993 pg. 47-48
+	//s = -2.ln(r)
+
+	time_t t;
+	float u1,u2,x,z,y,wn;
+	u1=0;
+	u2=0;
+	int check;
+	check = 1;
+
+	while(1){
+		do{
+
+			u1 = (float)rand()/(float)RAND_MAX;
+			u2 = (float)rand()/(float)RAND_MAX;
+			printf("u1:%f,u2:%f\n",u1,u2);
+		}while((u1<=0.0) && (u2<=0.0));
+
+		printf("Hello \n");
+
+   		z = 1.715528 * (u1 - 0.5) / u2;
+		printf("z:%f\n",z);
+
+    		x = 0.25 * z *z;
+		printf("x:%f\n",x);
+
+		if ((x - (1 - u2)) < glCompAcc) {
+			//check = 0;
+			//continue;
+			printf("First\n");
+			break;
+			
+		}
+		else if (x - (-log(u2)) < glCompAcc){
+			//check = 0;
+			//continue;
+			printf("Second\n");
+			break;
+			
+		}
+	}//while(check == 1);
+	
+
+	y = AngStdDev * z + MeanAngle;
+	if ((y - 360) > -glCompAcc){ 
+	    y = y - 360;
+	}
+ 
+	if (y < 0){
+	    y = 360 + y;
+	}
+	
+	printf("Last \n");
+	return y;
+
+  
+}
+
 /*
 void CircMeanConcentration(double* ValArray)
 {
@@ -88,54 +174,6 @@ void CircMeanConcentration(double* ValArray)
 */
 
 //Public Function WrappedNormal(ByVal MeanAngle As Double, ByVal AngStdDev As Double) As Double
-double WrappedNormal (float MeanAngle,float AngStdDev){
-
-	//Fisher 1993 pg. 47-48
-	//s = -2.ln(r)
-
-	float u1,u2,x,z,y,wn;
-	int check;
-	check = 1;
-
-	while(check == 1){
-		do{
-			time_t t;
-			srand(time(&t));
-			u1 = rand();
-			u2 = rand();
-			printf("%f,%f\n",u1,u2);
-		}while((u1<=0.0) && (u2<=0.0));
-   		z = 1.715528 * (u1 - 0.5) / u2;
-
-    		x = 0.25 * z *z;
-
-		if ((x - (1 - u2)) < glCompAcc) {
-			//check = 0;
-			//continue;
-			break;
-		}
-
-		if (x - (-log(u2)) < glCompAcc){
-			//check = 0;
-			 //continue;
-			break;
-		}
-	}
-	
-
-	y = AngStdDev * z + MeanAngle;
-	if ((y - 360) > -glCompAcc){ 
-	    y = y - 360;
-	}
- 
-	if (y < 0){
-	    y = 360 + y;
-	}
-
-	return y;
-
-  
-}
 
 /*
 double angularDeviation(double conc){

@@ -1,17 +1,17 @@
 
 TARGET=birds
-
-OBJS=First_run_6hrsOnly.cu
-
-LDFLAGS = -g -lGL -lGLU -lglut
-NVCC = nvcc
+OBJS=First_run_Full24hrs.o
+#CFLAGS=-g -lm -Wall -lgsl -lgslcblas
+CFLAGS=-g -lm -Wall 
+#-L/usr/local/lib -lgsl -lgslcblas
+CC=gcc
 
 all:${TARGET}
 
 ${TARGET}:${OBJS}
-	${NVCC} -o ${TARGET} ${OBJS} ${LDFLAGS}
+	${CC} -o ${TARGET} ${OBJS} ${CFLAGS}
 
-
+.PHONY:clean
 
 clean:
-	rm -f core* ${TARGET}
+	rm -f ${TARGET} *.o core*
