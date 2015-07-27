@@ -4,6 +4,7 @@
 //This file uses 6 hourly data. Each day is 6 hours long and skipping a day means to add 6
 //to the counter that counts the timesteps (l).
 
+//The birds start at 00:00 UTC which is 6pm in central time when there is no day light savings
 
 #include <math.h>
 #include <float.h>
@@ -28,10 +29,12 @@
 #define LONG_SIZE		429
 #define LAT_SIZE		429
 #define LINESIZE		15*LAT_SIZE+LAT_SIZE - 3
-#define TIMESTEPS		30*6
+#define TOTAL_DAYS		122
+#define TIMESTEPS		TOTAL_DAYS*24
 #define SKIP_TIMESTEPS		0
 #define STARTING_ROW		120.0
 #define STARTING_COL		150.0
+
 
 //The maximum lattitude south that the model cares about bird flight. If birds go below
 //that lattitude the model stops
@@ -91,13 +94,39 @@ float cols[11]={150,151,152,153,154,155,156,157,158,159,160};
 
 long int starting_l = 0;
 //--------------------------------------------------------------------------------------------------------------------------
-void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData,float* precipData,float* pressureData,float* u10data,float* v10data);
+void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirData,float* precipData,float* pressureData,float* u10data,float* v10data,int* lwData);
 float getProfitValue(float u,float v,float dirVal,float dir_u,float dir_v);
 float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSize);
 float WrappedNormal (float MeanAngle,float AngStdDev);
 int convert_to_month(char* month,char* day);
+int flight_over_water(int* lw_grid,float row_pos,float col_pos);
 //-------------------------------------------------------------------------------------------------------------------------------------
 							//Functions
+//------------------------------------------------------------------------------------------------------------------------------------
+/** @brief This function is implemented if the bird is at water after 6 hours of its flight
+ *
+ * The bird if above water after the 6 hours of flight will move West until it hits land and then
+ * it stops. The new position will be that when the bird first hits land. The bird keeps looking for
+ * land in the west direction as long as it finds it or if it exceeds a certain number of hours (18 here). 
+ *
+ * @param lw_grid The matrix that contains either 0 or 1 depending on whether it is land or water
+ * @param row_pos The row position of the bird
+ * @param col_pos The column position of the bird
+ * @return An array containing the new values for position of the bird
+*/
+int flight_over_water(int* lw_grid,float row_pos,float col_pos)
+{
+
+	int count_timesteps = 0;
+	while((lw_grid[(int)(rintf(row_pos)) * LONG_SIZE + (int)(rintf(col_pos))]==0)&&(count_timesteps < 18)){
+		col_pos += 0.36 * -1 * DESIRED_SPEED;
+	}
+
+	return col_pos;
+
+
+
+}
 //-------------------------------------------------------------------------------------------------------------------------------------
 float WrappedNormal (float MeanAngle,float AngStdDev){
 
@@ -170,7 +199,7 @@ int convert_to_month(char* month,char * day)
 	else if(strcmp(month,"OCT")==0){
 		index = 61; //The data for october starts after 31+30 days of sept and august respectively.
 	}
-	else if(strcmp(month,"SEPT")==0){
+	else if(strcmp(month,"NOV")==0){
 		index = 92; //The data for october starts after 31+30+31 days of sept,aug and oct respectively.
 	}
 	else{
@@ -206,39 +235,45 @@ float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSi
 	
 	//printf("x1:%f,x2:%f,y1:%f,y2:%f\n",x1,x2,y1,y2);
 	if(dataSize == 1){
-		Q11 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LAT_SIZE + x1) ];
-		Q12 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y2 * LAT_SIZE + x1) ];
-		Q21 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LAT_SIZE + x2) ];
-		Q22 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y2 * LAT_SIZE + x2) ];
+		Q11 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LONG_SIZE + x1) ];
+		Q12 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y2 * LONG_SIZE + x1) ];
+		Q21 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LONG_SIZE + x2) ];
+		Q22 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y2 * LONG_SIZE + x2) ];
 	}
 	else if(dataSize == 0) {
-		Q11 = data_array[(int)(y1 * LAT_SIZE + x1)];
-		Q12 = data_array[(int)(y2 * LAT_SIZE + x1)];
-		Q21 = data_array[(int)(y1 * LAT_SIZE + x2)];
-		Q22 = data_array[(int)(y2 * LAT_SIZE + x2)];
+		Q11 = data_array[(int)(y1 * LONG_SIZE + x1)];
+		Q12 = data_array[(int)(y2 * LONG_SIZE + x1)];
+		Q21 = data_array[(int)(y1 * LONG_SIZE + x2)];
+		Q22 = data_array[(int)(y2 * LONG_SIZE + x2)];
 	}
 
+	//If no interpolation needed
 	if((x2 == x1) && (y2 == y1)){
-		value = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LAT_SIZE + x1)];
+		value = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LONG_SIZE + x1)];
 	}
+	//If in a straight line with same x coordinates take average
 	else if((x2 == x1) && (y2 != y1)){
-			if(dataSize == 0) {
-				value+= data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LAT_SIZE + x)];
-				value+=((y-y1)/(y2-y1))*(data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y2 * LAT_SIZE + x)]-data_array[(int)(l*LAT_SIZE * LONG_SIZE + y1 * LAT_SIZE + x)]);
+			if(dataSize == 1) {
+				//value+= data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LONG_SIZE + x)];
+				//value+=((y-y1)/(y2-y1))*(data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y2 * LONG_SIZE + x)]-data_array[(int)(l*LAT_SIZE * LONG_SIZE + y1 * LONG_SIZE + x)]);
+				value=(data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LONG_SIZE + x)] + data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y2 * LONG_SIZE + x)])/2;
 			}
-			else if(dataSize == 1){
-				value+= data_array[(int)(y1 * LAT_SIZE + x)];
-				value+=((y-y1)/(y2-y1))*(data_array[(int)(y2 * LAT_SIZE + x)]-data_array[(int)(y1 * LAT_SIZE + x)]);
+			else if(dataSize == 0){
+				//value+= data_array[(int)(y1 * LONG_SIZE + x)];
+				//value+=((y-y1)/(y2-y1))*(data_array[(int)(y2 * LONG_SIZE + x)]-data_array[(int)(y1 * LONG_SIZE + x)]);
+				value= (data_array[(int)(y1 * LONG_SIZE + x)]+data_array[(int)(y2 * LONG_SIZE + x)])/2;
 			}
 	}
 	else if((x2 != x1) && (y2 == y1)){
-			if(dataSize == 0) {
-				value+= data_array[(int)(l  * LAT_SIZE * LONG_SIZE + x1 * LAT_SIZE + y)];
-				value+=((x-x1)/(x2-x1))*(data_array[(int)(l  * LAT_SIZE * LONG_SIZE + x2 * LAT_SIZE + y)]-data_array[(int)(l*LAT_SIZE*LONG_SIZE + x1 * LAT_SIZE + y)]);
+			if(dataSize == 1) {
+				//value+= data_array[(int)(l  * LAT_SIZE * LONG_SIZE + x1 * LONG_SIZE + y)];
+				//value+=((x-x1)/(x2-x1))*(data_array[(int)(l  * LAT_SIZE * LONG_SIZE + x2 * LONG_SIZE + y)]-data_array[(int)(l*LAT_SIZE*LONG_SIZE + x1 * LONG_SIZE + y)]);
+				value=(data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y * LONG_SIZE + x1)] + data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y * LONG_SIZE + x2)])/2;
 			}
-			else if(dataSize == 1){
-				value+= data_array[(int)(x1 * LAT_SIZE + y)];
-				value+=((x-x1)/(x2-x1))*(data_array[(int)(x2 * LAT_SIZE + y)]-data_array[(int)(x1 * LAT_SIZE + y)]);
+			else if(dataSize == 0){
+				//value+= data_array[(int)(x1 * LAT_SIZE + y)];
+				//value+=((x-x1)/(x2-x1))*(data_array[(int)(x2 * LAT_SIZE + y)]-data_array[(int)(x1 * LAT_SIZE + y)]);
+				value= (data_array[(int)(y * LONG_SIZE + x1)]+data_array[(int)(y * LONG_SIZE + x2)])/2;
 			}
 	}
 
@@ -345,9 +380,10 @@ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_
 
 	return profit_value;
 }
+
 //------------------------------------------------------------------------------------------------------------------------------------
 //Main part of the function
-void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, float* precipData,float* pressureData,float* u10data,float* v10data)
+void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirData, float* precipData,float* pressureData,float* u10data,float* v10data,int* lwData)
 {
 	fprintf(outTxt,"pos_row \t pos_col \t u_val \t\t v_val \t\t dir_u \t\t dir_v \t\t u_air \t\t v_air \t\t bird_GS \t wind_Speed \t distance \t l \t days\n");
 	float distance,prev_row,prev_col,bird_AirSpeed,wind_Speed;
@@ -368,7 +404,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		return;
 	}
 	int k;
-	long i,l,l_old;
+	long i,l_old;
 
 	float pressure_sum,pressure_MultSum,last_pressure,slope;
 	pressure_MultSum = 0;
@@ -379,8 +415,7 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 	
 	//l = 18;
 	//l_old = 18;
-	l = 0;
-	l_old = 0;
+	l_old = l;
 	float profit_value,dirAngleFromFile,dirAngle,actualAngle;
 
 	
@@ -454,6 +489,10 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 		actualAngle = dirAngle;
 
 
+//************************************************************************************************************************************************
+//*********************Check profit value at ground; Or for V10 and U10***************************************************************************
+
+
 		//Relation between last_pressure and slope is an OR
 		if((getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v) >= MIN_PROFIT) && ((last_pressure>=1009)||(slope >-1))){
 			
@@ -462,7 +501,9 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 			//dirAngle = WrappedNormal(dirAngleFromFile,STD_BIRDANGLE);
 			
 			printf("\n\nl value check: %ld\n\n",l);
+//-------------------------------------------Start of the 6 hour bird flight----------------------------------------------------------------------------------	
 			
+
 			for(k=0;k<6;k++,l++ ) {
 				i = skip_size + l * LAT_SIZE * LONG_SIZE + pos_row * LAT_SIZE + pos_col;
 				skip = 0;
@@ -557,16 +598,45 @@ void get_movementData(FILE* outTxt,float* udata,float* vdata,float* dirData, flo
 					return;
 				}
 			}
+//-------------------------------------------End of the 6 hour bird flight------------------------------------------------------------------------------------
+
+			//If birds are found at sea after 6 hours of flight
+			if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==0){
+				int count_timesteps = 0;
+
+				while((lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_row))]==0)&&(count_timesteps < 18)){
+					//Bilinear interpolation for u and v data
+					u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
+					v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
+				
+					pos_col = pos_col + (u_val - DESIRED_SPEED) * 0.36 * -1;
+					fprintf(outTxt,"%f \t %f \t %f \t %f\n",pos_row,pos_col,u_val,v_val);
+					l++;
+					count_timesteps++;
+				}
+				//Going back to the time of the day when the birds start their flight
+				l+=18-count_timesteps;
+//				
+			}
+			//If the birds end up in land instead of at sea
+			else{ 
+				//Going back to the time of the day when the birds start their flight
+				l+=18;
+			}
 		}
-		
+//*********************End of profit value check at ground; Or for V10 and U10********************************************************************
+//************************************************************************************************************************************************		
+		//If profit values for V10 and U10 were too low the very first time the bird does not fly
+		//It has to still wait for the next day or +24 hours
+		//This is because the winds are very unfavourable at pressure level 10
 		//v10 and u10 profit values were too low
 		if(l_old == l){
 			printf("u10 v10 profit value too low!\n");
-			//What does this mean?
-			l+=6;
-
-			//l+=16?
+			//Going to the next time period in which the bird can fly in case that the 
+			//profit value for V10 and U10 was too low the first time it tried to fly.
+			l+=24;
 		}
+
 		//Every day has 24 time steps and this line skips the total desired number of days
 		//Adding 17 to skip the hours that do not fall between 7pm and 1am
 		l = l + (STOPOVER_DAYS * 24) + 17;
@@ -623,28 +693,39 @@ int main(int argc,char* argv[])
 {
 //--------------------------Checking for input arguments------------------------------//
 
-	if(argc < 5){
-		printf("\n\tNot enough arguments; Needed 3 provided %d \n\tUsage:\tExecutableFileName StartDay(Without initial zeroes) StartMonth(Abbr. all caps) StartYear(Full year) PressureLevel\n",argc - 1);
+	//char baseFileName[] = "~/Documents/Birds_Full/Birds_data/InterpolatedData/";
+	char baseFileName[] = "../../Birds_Full/Birds_data/InterpolatedData/";
+	char yearFileName[80];
+	char fullFileName[80];
+	
+	if(argc < 4){
+		printf("\n\tNot enough arguments; Needed 3 provided %d \n\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes)\n\n",argc - 1);
 		return 0;
 	}
-	else if (argc>5){
-		printf("\n\tToo many arguments; Needed 3 provided %d \n\tUsage:\tExecutableFileName StartDay(Without initial zeroes) StartMonth(Abbr. all caps) StartYear(Full year) PressureLevel\n",argc-1);
+	else if (argc>4){
+		printf("\n\tToo many arguments; Needed 3 provided %d \n\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes)\n\n",argc-1);
 		return 0;
 	}
 
 	//Getting the offset into the data so that user can specify a starting date
 	int offset_into_data = 0;
-	offset_into_data = convert_to_month(argv[2],argv[3]);
+	offset_into_data = convert_to_month(argv[2],argv[1]);
+	offset_into_data += atoi(argv[3]);
 
 	//Checking if correct year specified
-	if((strcmp(argv[3],"2008")==0)||(strcmp(argv[3],"2009")==0)||(strcmp(argv[3],"2010")==0)||(strcmp(argv[3],"2011")==0)||(strcmp(argv[3],"2012")==0)||(strcmp(argv[3],"2013")==0)){
+	if((strcmp(argv[1],"2008")==0)||(strcmp(argv[1],"2009")==0)||(strcmp(argv[1],"2010")==0)||(strcmp(argv[1],"2011")==0)||(strcmp(argv[1],"2012")==0)||(strcmp(argv[1],"2013")==0)){
 		//Add file location here
+		strcpy(yearFileName,baseFileName);
+		strcat(yearFileName,argv[1]);
+		strcat(yearFileName,"/");
 	}
 	else{
-		printf("\n\t Invalid year specified\n\tSpecified %s; Use years from 2008 to 2013 in its full format\n",argv[3]);
+		printf("\n\tInvalid year specified\n\tSpecified %s; Use years from 2008 to 2013 in its full format\n",argv[1]);
+		printf("\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes)\n\n");
 		return 0;		
 	}
 
+/*
 	//Checking if correct pressure level specified
 	if((strcmp(argv[4],"750")==0)||(strcmp(argv[4],"850")==0)||(strcmp(argv[4],"925")==0)){
 		//Add file location here
@@ -653,6 +734,7 @@ int main(int argc,char* argv[])
 		printf("\n\t Invalid pressure level specified\n\tSpecified %s; Use 750 850 or 925\n",argv[4]);
 		return 0;		
 	}
+*/
 //--------------------------Seeding random function-----------------------------------//
 
 	struct timeval t1;
@@ -682,47 +764,89 @@ int main(int argc,char* argv[])
 	int* lwData;
 	lwData = (int*)malloc(LAT_SIZE * LONG_SIZE * sizeof(int));
 	
-//-------------------------------------------------------------------------------//
-	FILE *posdataTxt;
+//------------Opening position data file where lat and long data will be stored----------------//
+	
+	FILE *posdataTxt,*vdataTxt,*udataTxt,*v10dataTxt,*u10dataTxt,*precipTxt,*pressureTxt,*lwTxt,*dirTxt;
 	posdataTxt = fopen("posdata.txt","w");
 	if(posdataTxt == NULL) {
 		perror("Cannot open udataTxt file\n");
 		return -1;
 	}
-	FILE *vdataTxt,*udataTxt;
-	udataTxt = fopen("../Birds_data/output/U850_30days_Sept_2011.txt","r");
-	vdataTxt = fopen("../Birds_data/output/V850_30days_Sept_2011.txt","r");
+//----------------------Opening U850 data file----------------------------//
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"U850.txt");
+
+	printf("U50 filename is %s \n",fullFileName);
+	udataTxt = fopen(fullFileName,"r");
+
 	if(udataTxt == NULL) {
 		perror("Cannot open file with U850 data\n");
 		return -1;
 	}
+//------------------------Opening V850 data file--------------------------//
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"V850.txt");
+
+	vdataTxt = fopen(fullFileName,"r");
+
 	if(vdataTxt == NULL) {
 		perror("Cannot open file with V850 data\n");
 		return -1;
 	}
-
+//-----------------------Opening U10 data file---------------------------//
 	//Birds will check the wind at the surface therefore the u and v
 	//at 10m is required
-	FILE *v10dataTxt,*u10dataTxt;
-	u10dataTxt = fopen("../Birds_data/output/U10_30days_Sept_2011.txt","r");
-	v10dataTxt = fopen("../Birds_data/output/V10_30days_Sept_2011.txt","r");
+	
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"U10.txt");
+
+	u10dataTxt = fopen(fullFileName,"r");
+
 	if(u10dataTxt == NULL) {
 		perror("Cannot open file with U10 data\n");
 		return -1;
 	}
+//-----------------------Opening V10 data file---------------------------//
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"V10.txt");
+
+	v10dataTxt = fopen(fullFileName,"r");
+	
 	if(v10dataTxt == NULL) {
 		perror("Cannot open file with V10 data\n");
 		return -1;
 	}
-//--------------------------Land vs Water File------------------------------------------------------------------------//
-	FILE* lwTxt;
+//--------------------Opening PRCP data file------------------------------//
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"PRCP.txt");
+
+	precipTxt = fopen(fullFileName,"r");
+	if(precipTxt == NULL) {
+		perror("Cannot open file with PRCP data\n");
+		return -1;
+	}
+//------------------------Opening MSLP data file--------------------------//
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"MSLP.txt");
+
+	pressureTxt = fopen(fullFileName,"r");
+	if(pressureTxt == NULL) {
+		perror("Cannot open file with pressure data!\n");
+		return -1;
+	}
+//--------------------------Opening Land vs Water File---------------------//
 	lwTxt = fopen("lw_crop.txt","r");
 	if(lwTxt == NULL) {
 		perror("Cannot open file with direction data\n");
 		return -1;
 	}
-//--------------------------Direction file (Example: ext_crop.txt or extP_crop.txt)-----------------------------------//
-	FILE* dirTxt;
+//--------------------------Opening Direction file (Example: ext_crop.txt or extP_crop.txt)-------------//
 	dirTxt = fopen("extP_cropnew.txt","r");
 	//dirTxt = fopen("ext_crop.txt","r");
 	if(dirTxt == NULL) {
@@ -730,18 +854,7 @@ int main(int argc,char* argv[])
 		return -1;
 	}
 //--------------------------Direction file code end-------------------------------------------------------------------//
-	FILE* precipTxt;
-	precipTxt = fopen("../Birds_data/output/PRCP_30days_Sept_2011.txt","r");
-	if(precipTxt == NULL) {
-		perror("Cannot open file with PRCP data\n");
-		return -1;
-	}
-	FILE* pressureTxt;
-	pressureTxt = fopen("../Birds_data/output/MSLP_30days_Sept_2011.txt","r");
-	if(pressureTxt == NULL) {
-		perror("Cannot open file with pressure data!\n");
-		return -1;
-	}
+	
 
 	FILE* inpCheckU;
 	inpCheckU = fopen("inpCheckU.txt","w");
@@ -770,21 +883,23 @@ int main(int argc,char* argv[])
 //-------------------------------Reading U850 & V850 values-----------------------------------//
 	while(fgets(line,LINESIZE,udataTxt)!=NULL){
 		startPtr = line;
-		for(i=0;i<LAT_SIZE;i++){
+		for(i=0;i<LONG_SIZE;i++){
 			Value = 0;
 			memset(tempVal,'\0',sizeof(tempVal));
-			if(i != (LAT_SIZE - 1)) {
+			if(i != (LONG_SIZE - 1)) {
 				endPtr = strchr(startPtr,',');
 				strncpy(tempVal,startPtr,endPtr-startPtr);
 				Value = atof(tempVal);
 				udata[j * LAT_SIZE + i] = Value;
+				
 				endPtr = endPtr + 1;
 				startPtr = endPtr;
 			}
-			else if(i == (LAT_SIZE - 1)){
+			else if(i == (LONG_SIZE - 1)){
 				strcpy(tempVal,startPtr);
 				Value = atof(tempVal);
 				udata[j * LAT_SIZE + i] = Value;
+				
 			}
 		}
 		j++;
@@ -1033,7 +1148,7 @@ int main(int argc,char* argv[])
 		//STARTING_ROW = rows[i];
 		//STARTING_COL = cols[i];
 		
-		get_movementData(posdataTxt,udata,vdata,dirData,precipData,pressureData,u10data,v10data);
+		get_movementData(posdataTxt,offset_into_data,udata,vdata,dirData,precipData,pressureData,u10data,v10data,lwData);
 	//}
 
 
