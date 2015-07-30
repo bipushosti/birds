@@ -30,10 +30,11 @@
 #define LAT_SIZE		429
 #define LINESIZE		15*LAT_SIZE+LAT_SIZE - 3
 #define TOTAL_DAYS		122
-#define TIMESTEPS		TOTAL_DAYS*24
+#define TIMESTEPS_PER_DAY	24
+#define TIMESTEPS		TOTAL_DAYS*TIMESTEPS_PER_DAY
 #define SKIP_TIMESTEPS		0
-#define STARTING_ROW		120.0
-#define STARTING_COL		150.0
+#define STARTING_ROW		150.0
+#define STARTING_COL		250.0
 
 
 //The maximum lattitude south that the model cares about bird flight. If birds go below
@@ -186,7 +187,7 @@ float WrappedNormal (float MeanAngle,float AngStdDev){
 
   
 }
-//---------------------------------------------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------------------------------------------------------//
 int convert_to_month(char* month,char * day)
 {
 	int index,offset;
@@ -207,7 +208,7 @@ int convert_to_month(char* month,char * day)
 		return -1;
 	}
 	
-	offset = index + atoi(day) - 1;
+	offset = (index  + (atoi(day) - 1))* TIMESTEPS_PER_DAY;
 	return offset;
 
 }
@@ -487,7 +488,7 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 		dirAngle = WrappedNormal(dirAngleFromFile,STD_BIRDANGLE);
 		printf("\n First DirectionAngle = %f,AngleFromFile = %f\n",dirAngle,dirAngleFromFile);
 		actualAngle = dirAngle;
-
+		l_old  = l;
 
 //************************************************************************************************************************************************
 //*********************Check profit value at ground; Or for V10 and U10***************************************************************************
@@ -560,11 +561,11 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 				if ((profit_value >= MIN_PROFIT) && (precip_val < MAX_PRECIP) ) {
 				
 
-					//Positon is in a 10 km grid. This means for 1m/s, the 
-					//position change in 1 hour is 3.6/10 = 0.36units in the grid
+					//Position is in a 10 km grid. This means for 1m/s, the 
+					//position change in 1 hour is 3.6km/10 = 0.36units in the grid
 
 	//				pos_row = pos_row + (v_val + dir_v)*0.36;
-					pos_row = pos_row + (v_val + dir_v)*0.36*-1;
+					pos_row = pos_row + (v_val + dir_v)*0.36* -1;
 					pos_col = pos_col + (u_val + dir_u)*0.36;
 
 					//float tmp;
@@ -600,19 +601,50 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 			}
 //-------------------------------------------End of the 6 hour bird flight------------------------------------------------------------------------------------
 
+
+			lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==0?printf("Bird is at Sea!!\n"):printf("Bird not at Sea\n");
+
 			//If birds are found at sea after 6 hours of flight
 			if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==0){
 				int count_timesteps = 0;
+				int loop_check = 0;
+				fprintf(outTxt,"%f \t %f \t %f \t %f \t At Sea!! \n",pos_row,pos_col,u_val,v_val);
+				printf("At sea\n");
 
-				while((lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_row))]==0)&&(count_timesteps < 18)){
+				//while((lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_row))]==0)&&(count_timesteps < 18)){
+				while(loop_check == 0){
 					//Bilinear interpolation for u and v data
 					u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
 					v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
 				
-					pos_col = pos_col + (u_val - DESIRED_SPEED) * 0.36 * -1;
-					fprintf(outTxt,"%f \t %f \t %f \t %f\n",pos_row,pos_col,u_val,v_val);
+					//Desired speed needs to change in tha case of column position or the birds
+					//will not fly west
+					pos_row = pos_row + (v_val)*0.36*-1;	
+					pos_col = pos_col + (u_val - DESIRED_SPEED) * 0.36;
+					
+
+					
 					l++;
 					count_timesteps++;
+
+					//Birds can actually fly upto 3 days to get to land; This needs to change
+					//As of now, if the birds can not find their way back by next sunrise or +18 hrs
+					//they die.
+					if(count_timesteps >= 18){ 
+						loop_check = 1;
+						printf("Dead Bird!");
+						return ;
+					}
+					if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==1){
+						loop_check = 1;
+						printf("Land Sighted!\n");
+					}
+
+					if(pos_row >=  MAX_LAT_SOUTH){
+						printf("\t\tBird reached or passed the southern most lattitude\n");
+						return;	
+					}
+					fprintf(outTxt,"%f \t %f \t %f \t %f \t At Sea!! \n",pos_row,pos_col,u_val,v_val);
 				}
 				//Going back to the time of the day when the birds start their flight
 				l+=18-count_timesteps;
@@ -639,7 +671,7 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 
 		//Every day has 24 time steps and this line skips the total desired number of days
 		//Adding 17 to skip the hours that do not fall between 7pm and 1am
-		l = l + (STOPOVER_DAYS * 24) + 17;
+		l = l + (STOPOVER_DAYS * 24);
 		l_old = l - REGRESSION_HRS;
 
 		printf("check l %ld\n",l);
@@ -709,8 +741,7 @@ int main(int argc,char* argv[])
 
 	//Getting the offset into the data so that user can specify a starting date
 	int offset_into_data = 0;
-	offset_into_data = convert_to_month(argv[2],argv[1]);
-	offset_into_data += atoi(argv[3]);
+	offset_into_data = convert_to_month(argv[2],argv[3]);
 
 	//Checking if correct year specified
 	if((strcmp(argv[1],"2008")==0)||(strcmp(argv[1],"2009")==0)||(strcmp(argv[1],"2010")==0)||(strcmp(argv[1],"2011")==0)||(strcmp(argv[1],"2012")==0)||(strcmp(argv[1],"2013")==0)){
@@ -987,6 +1018,7 @@ int main(int argc,char* argv[])
 
 //----------------------------------Reading precipitation Values-----------------------------//
 
+
 // Precipitation value read from the text file is multiplied by 3600 to convert from
 // kg/(m2*s1) into mm/hour. Formula from: https://www.dkrz.de/daten-en/faq
 
@@ -1148,6 +1180,7 @@ int main(int argc,char* argv[])
 		//STARTING_ROW = rows[i];
 		//STARTING_COL = cols[i];
 		
+		fprintf(posdataTxt,"Starting location(row,col) = (%f,%f) \n Starting Day = %s %s %s\n",STARTING_ROW,STARTING_COL,argv[1],argv[2],argv[3]);
 		get_movementData(posdataTxt,offset_into_data,udata,vdata,dirData,precipData,pressureData,u10data,v10data,lwData);
 	//}
 

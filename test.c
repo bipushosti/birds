@@ -1,128 +1,179 @@
 
 #include <stdio.h>
-#include <math.h>
-#include <float.h>
-#include <netcdf.h>
+#include <string.h>
 #include <stdlib.h>
 
-#define NDIMS		4	//Number of dimensions
-#define NETCDF_FILE	"ERA_Sept_1980_925pl_NA.nc"
-#define LAT_SIZE	95
-#define LONG_SIZE	55
-#define TIMESTEPS	120
-#define NUM_RECORDS	120
+#define LINESIZE	500
 
-/* These are used to calculate the values we expect to find. */
-#define SAMPLE_U 1.3
-#define SAMPLE_V 1.4
-#define START_LAT 70.5
-#define START_LON 229.5
-
-
-/* Handle errors by printing an error message and exiting with a
- * non-zero status. */
-#define ERR(e) {printf("Error: %s\n", nc_strerror(e)); return 2;}
-
-void main() 
+int main()
 {
 
-	int ncid,varid,u_varid,v_varid;
-	int lat_varid,lon_varid,time_varid;	
+	FILE* inpFile;
+	inpFile = fopen("InputData.txt","r");
+
+	if(inpFile == NULL) {
+		perror("Cannot open file with input data\n");
+		return -1;
+	}
+
+	int i,j;
+	char line[LINESIZE];
+	memset(line,'\0',sizeof(line));
+	char tempVal[15];
+	memset(tempVal,'\0',sizeof(tempVal));
+	char* startPtr,*endPtr;
+	float Value;
+	
+	j = 0;
+
+	//Counting number of rows(y)
+	do{
+		i = fgetc(inpFile);
+		if(i == '\n') j++;
+	}while(i != EOF);
+
+	i = (j - 5)/2;
+
+	if(i%2 !=0){
+		printf("\n\tError: Unequal number of starting locations and starting dates\n\n");
+	}
 
 	
-	/* The start and count arrays will tell the netCDF library where to
-	read our data. */
-	size_t start[NDIMS], count[NDIMS];
 
-	/* Program variables to hold the data we will read. We will only
-	need enough space to hold one timestep of data; one record. */
-
-/*	float* udata;
-	udata = (float*)malloc(LAT_SIZE  * LONG_SIZE * TIMESTEPS * sizeof(float));
-	float* vdata;
-	vdata = (float*)malloc(LAT_SIZE  * LONG_SIZE * TIMESTEPS * sizeof(float));
-*/
-	float udata[LONG_SIZE][LAT_SIZE][TIMESTEPS];
-	float vdata[LONG_SIZE][LAT_SIZE][TIMESTEPS];
+	while(fgets(line,LINESIZE,inpFile)!=NULL){
+		//startPtr = line;
+		//memset(tempVal,'\0',sizeof(tempVal));
+		//endPtr = strchr(startPtr,' ');
+		//strncpy(tempVal,startPtr,endPtr-startPtr);
+		//	
+		//endPtr = endPtr + 1;
+		//startPtr = endPtr;
+		if(i!=0){
 		
-	/* These program variables hold the latitudes and longitudes. */
-	float lat[LAT_SIZE],lon[LONG_SIZE];
+		}
+		i++;
 
-	char u_units_in[MAX_ATT_LEN], v_units_in[MAX_ATT_LEN];
-	char lat_units_in[MAX_ATT_LEN], lon_units_in[MAX_ATT_LEN];
+		printf("Lines %d\n",i);
+		printf("%c\n",line[0]);
+		if(line[0] == '\n') break;
+		memset(line,'\0',sizeof(line));
+	}
+	//printf("Lines %d\n",i);
+/*
+	//Counting number of rows(y)
+	do{
+		i = fgetc(datTxt1);
+		if(i == '\n') YSIZE++;
+	}while(i != EOF);
 
-	/* Loop indexes. */
-   	int lvl, lat_ind, lon_ind, rec, i = 0;
+*/
 
-	int retval;
+	fclose(inpFile);
+	
 
-   	/* We will learn about the data file and store results in these
-	program variables. */
-	int ndims_in, nvars_in, ngatts_in, unlimdimid_in;
-
-	if((retval = nc_open(NETCDF_FILE,NC_NOWRITE,&ncid))) ERR(retval);
-
-	 if ((retval = nc_inq(ncid, &ndims_in, &nvars_in, &ngatts_in, &unlimdimid_in))) ERR(retval);
-
-	/* In this case we know that there are 2 netCDF dimensions, 4 netCDF variables, 
-	no global attributes, and no unlimited dimension. */
-	if (ndims_in != 3 || nvars_in != 5 || ngatts_in != 2 || unlimdimid_in != -1) return 2;
-
-
-	/* Get the varids of the latitude and longitude coordinate variables. */
-	if ((retval = nc_inq_varid(ncid,"latitude", &lat_varid))) ERR(retval);
-	if ((retval = nc_inq_varid(ncid,"longitude", &lon_varid))) ERR(retval);
-
-	/* Read the coordinate variable data. */
-	if ((retval = nc_get_var_float(ncid, lat_varid, &lat[0]))) ERR(retval);
-	if ((retval = nc_get_var_float(ncid, lon_varid, &lon[0]))) ERR(retval);
-
-	/* Check the coordinate variable data. */
-	for (lat_ind = 0; lat_ind < LAT_SIZE; lat_ind++)
-		if (lat[lat_ind] != START_LAT + 5.*lat_ind)
-			 return 2;
-		for (lon_ind = 0; lon_ind < LONG_SIZE; lon_ind++)
-			if (lon[lon_ind] != START_LON + 5.*lon_ind)
-				 return 2;
-
-  	 /* Get the varids of u and v wind variables. */
-	if ((retval = nc_inq_varid(ncid, "u", &u_varid))) ERR(retval);
-	if ((retval = nc_inq_varid(ncid, "v", &v_varid))) ERR(retval);
-
-
-
-	/* Each of the netCDF variables has a "units" attribute. Let's read
-	them and check them. */
-	if ((retval = nc_get_att_text(ncid, lat_varid, UNITS, lat_units_in))) ERR(retval);
-	if (strncmp(lat_units_in, LAT_UNITS, strlen(LAT_UNITS))) return 2;
-
-	/* Read and check one record at a time. */
-	for (rec = 0; rec < NUM_RECORDS; rec++)
-	{
-		start[0] = rec;
-		if ((retval = nc_get_vara_float(ncid, u_varid, start, count, &udata[0][0][0]))) ERR(retval);
-		if ((retval = nc_get_vara_float(ncid, v_varid, start,count, &vdata[0][0][0]))) ERR(retval);
-
-		/* Check the data. */
-		i = 0;
-		for (lvl = 0; lvl < TIMESTEPS; lvl++)
-			for (lat_ind = 0; lat_ind < LAT_SIZE; lat_ind++)
-				for (lon_ind = 0; lon_ind < LONG_SIZE; lon_ind++)
-				{
-					if (udata[lvl][lat][lon] != SAMPLE_U + i) return 2;
-					if (vdata[lvl][lat][lon] != SAMPLE_V + i) return 2;
-					i++;
-				}
-
-	} /* next record */
-
-
-	/* Close the file. */
-	if ((retval = nc_close(ncid))) ERR(retval);
-
-//	free(udata);
-//	free(vdata);
-
-	printf("*** SUCCESS reading example file pres_temp_4D.nc!\n");
-	return 0;
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/*
+int convert_to_month(char* month,char* day);
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+int convert_to_month(char* month,char * day)
+{
+	int index,offset;
+	if(strcmp(month,"AUG")==0){
+		index = 0; //The data starts in august
+	}
+	else if(strcmp(month,"SEPT")==0){
+		index = 31; //The data for september starts after 31 days of august
+	}
+	else if(strcmp(month,"OCT")==0){
+		index = 61; //The data for october starts after 31+30 days of sept and august respectively.
+	}
+	else if(strcmp(month,"SEPT")==0){
+		index = 92; //The data for october starts after 31+30+31 days of sept,aug and oct respectively.
+	}
+	else{
+		printf("\n\t\tIncorrect month used\n\t\tUse between August-November inclusive; Only use abbriviated caps of the months; august = AUG\n\n");
+		return -1;
+	}
+	
+	offset = index + atoi(day) - 1;
+	return offset;
+
+}
+//--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+int main(int argc,char* argv[])
+{
+	char baseFileName[] = "../Birds_data/InterpolatedData/";
+	char yearFileName[80];
+	char fullFileName[80];
+
+	if(argc < 4){
+		printf("\n\tNot enough arguments; Needed 3 provided %d \n\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes)\n\n",argc - 1);
+		return 0;
+	}
+	else if (argc>4){
+		printf("\n\tToo many arguments; Needed 3 provided %d \n\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes)\n\n",argc-1);
+		return 0;
+	}
+
+	//Getting the offset into the data so that user can specify a starting date
+	int offset_into_data = 0;
+	offset_into_data = convert_to_month(argv[2],argv[1]);
+
+	//Checking if correct year specified
+	if((strcmp(argv[1],"2008")==0)||(strcmp(argv[1],"2009")==0)||(strcmp(argv[1],"2010")==0)||(strcmp(argv[1],"2011")==0)||(strcmp(argv[1],"2012")==0)||(strcmp(argv[1],"2013")==0)){
+		//Add file location here
+		strcpy(yearFileName,baseFileName);
+		strcat(yearFileName,argv[1]);
+		strcat(yearFileName,"/");
+	}
+	else{
+		printf("\n\tInvalid year specified\n\tSpecified %s; Use years from 2008 to 2013 in its full format\n",argv[1]);
+		printf("\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes)\n\n");
+		return 0;		
+	}
+
+//----------------------------------------------------------------------------------------------------------------------------------------------------------------
+	memset(fullFileName,0,strlen(fullFileName));
+
+	FILE *vdataTxt,*udataTxt;	
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"U850");
+	strcat(fullFileName,"_");
+	strcat(fullFileName,argv[1]);
+	strcat(fullFileName,".txt");
+
+
+	//udataTxt = fopen("../Birds_data/InterpolatedData/U850_30days_Sept_2011.txt","r");
+	udataTxt = fopen(fullFileName,"r");
+	vdataTxt = fopen("../Birds_data/output/V850_30days_Sept_2011.txt","r");
+	if(udataTxt == NULL) {
+		perror("Cannot open file with U850 data\n");
+		return -1;
+	}
+	if(vdataTxt == NULL) {
+		perror("Cannot open file with V850 data\n");
+		return -1;
+	}
+	
+	fclose(udataTxt);
+	fclose(vdataTxt);
+	
+	return 1;
+}
+*/
+
