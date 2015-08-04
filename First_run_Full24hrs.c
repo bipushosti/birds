@@ -33,7 +33,7 @@
 #define TIMESTEPS_PER_DAY	24
 #define TIMESTEPS		TOTAL_DAYS*TIMESTEPS_PER_DAY
 #define SKIP_TIMESTEPS		0
-#define STARTING_ROW		150.0
+#define STARTING_ROW		120.0
 #define STARTING_COL		250.0
 
 
@@ -90,9 +90,6 @@ char* months[11] = {"AUG","SEPT","OCT","NOV","AUG","SEPT","OCT","NOV","AUG","SEP
 float rows[11]={140,141,142,143,144,145,146,147,148,149,150};
 float cols[11]={150,151,152,153,154,155,156,157,158,159,160};
 
-//float rows[11]={100,99,98,97,96,95,94,93,92,91,90};
-//float cols[11]={250,250,250,250,250,250,250,250,250,250,250};
-
 long int starting_l = 0;
 //--------------------------------------------------------------------------------------------------------------------------
 void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirData,float* precipData,float* pressureData,float* u10data,float* v10data,int* lwData);
@@ -100,11 +97,13 @@ float getProfitValue(float u,float v,float dirVal,float dir_u,float dir_v);
 float bilinear_interpolation(float x,float y,float* data_array,long l,int dataSize);
 float WrappedNormal (float MeanAngle,float AngStdDev);
 int convert_to_month(char* month,char* day);
-int flight_over_water(int* lw_grid,float row_pos,float col_pos);
+//int flight_over_water(int* lw_grid,float row_pos,float col_pos);
+float * get_u_v_dirAngle(float dirAngle,float speed);
+float* check_bird_location(FILE* posFile,float* varData,float* udata,float* vdata,float* dirData,float pos_row,float pos_col,int index,long l);
 //-------------------------------------------------------------------------------------------------------------------------------------
 							//Functions
 //------------------------------------------------------------------------------------------------------------------------------------
-/** @brief This function is implemented if the bird is at water after 6 hours of its flight
+/** @brief This function is implemented to check the bird location
  *
  * The bird if above water after the 6 hours of flight will move West until it hits land and then
  * it stops. The new position will be that when the bird first hits land. The bird keeps looking for
@@ -115,19 +114,88 @@ int flight_over_water(int* lw_grid,float row_pos,float col_pos);
  * @param col_pos The column position of the bird
  * @return An array containing the new values for position of the bird
 */
-int flight_over_water(int* lw_grid,float row_pos,float col_pos)
-{
 
-	int count_timesteps = 0;
-	while((lw_grid[(int)(rintf(row_pos)) * LONG_SIZE + (int)(rintf(col_pos))]==0)&&(count_timesteps < 18)){
-		col_pos += 0.36 * -1 * DESIRED_SPEED;
+float* check_bird_location(FILE* posFile,float* landWaterData,float* udata,float* vdata,float* dirData,float pos_row,float pos_col,int index,long l)
+{
+	
+	static float ret_data[3] = {0}; // ret_data[0] = new l value, 1 = new pos_row value , 2 = new pos_col
+	float dir_u,dir_v,u_val,v_val,dirAngle;
+	char *location;
+	if(index == 0){
+		location = "Sea";
+	}else if(index == 1){
+		location = "Land";
+	}else if(index == 2){
+		location = "Fresh Water";
 	}
 
-	return col_pos;
+	v_val = 0;
+	u_val = 0;
+	dir_u = 0;
+	dir_v = 0;
+	if(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==index){
+
+		int count_timesteps = 0;
+		int loop_check = 0;
+
+		while(loop_check == index){
+
+			//Bilinear interpolation for u and v data
+			u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
+			v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
+			
+			if(index == 0) {
+				dirAngle = 270;
+			}else if (index == 1){
+				dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+				dirAngle = WrappedNormal(dirAngle,STD_BIRDANGLE);
+			}
+
+			dir_u = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[0];
+			dir_v = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[1];
+			//Desired speed needs to change in tha case of column position or the birds
+			//will not fly west
+			pos_row = pos_row + (v_val + dir_v) * 0.36 * -1;	
+			pos_col = pos_col + (u_val + dir_u) * 0.36;
+	
+			l++;
+			count_timesteps++;
+
+			fprintf(posFile,"%f \t %f \t %f \t %f \t At %s!! \n",pos_row,pos_col,u_val,v_val,location);
 
 
+			//Birds can actually fly upto 3 days to get to land; This needs to change
+			//As of now, if the birds can not find their way back by next sunrise or +18 hrs
+			//they die.
+			if(count_timesteps >= 18){ 
+				loop_check = 1;
+				printf("Dead Bird!");
+				exit(0) ;
+			}
+			if(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))] == 1){
+				loop_check = 1;
+				printf("Land Sighted!\n");
+			}
 
+			if(pos_row >=  MAX_LAT_SOUTH){
+				printf("\t\tBird reached or passed the southern most lattitude\n");
+				exit(0);	
+			}
+			
+		}
+		l+=18-count_timesteps;
+	}
+	else{
+		//Going back to the time of the day the birds start their flight
+		l+=18;
+	}
+	ret_data[0] = (float)l;
+	ret_data[1] = pos_row;
+	ret_data[2] = pos_col;
+
+	return ret_data;
 }
+
 //-------------------------------------------------------------------------------------------------------------------------------------
 float WrappedNormal (float MeanAngle,float AngStdDev){
 
@@ -381,6 +449,35 @@ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_
 
 	return profit_value;
 }
+//------------------------------------------------------------------------------------------------------------------------------------
+
+//------------------------------------------------------------------------------------------------------------------------------------
+float * get_u_v_dirAngle(float dirAngle,float speed)
+{
+	static float u_v_dirAngles[2];	
+	
+	if(dirAngle <= 90){//Checked OK
+		dirAngle = 90 - dirAngle;
+		u_v_dirAngles[0] = speed * cos(dirAngle * (PI/180));
+		u_v_dirAngles[1] = speed * sin(dirAngle * (PI/180));	
+	}
+	else if((dirAngle > 90) && (dirAngle <= 180)){//Checked OK
+		dirAngle -= 90;
+		u_v_dirAngles[0] = speed * cos(dirAngle * (PI/180));
+		u_v_dirAngles[1] = speed * sin(dirAngle * (PI/180)) * -1;
+	}
+	else if((dirAngle > 180) && (dirAngle <= 270)) {
+		dirAngle = 270 - dirAngle;
+		u_v_dirAngles[0] = speed * cos(dirAngle * (PI/180)) * -1;
+		u_v_dirAngles[1] = speed * sin(dirAngle * (PI/180)) * -1;
+	}
+	else if((dirAngle > 270) && (dirAngle <= 360)){
+		dirAngle -= 270;
+		u_v_dirAngles[0] = speed * cos(dirAngle * (PI/180)) * -1;
+		u_v_dirAngles[1] = speed * sin(dirAngle * (PI/180));
+	}
+	return u_v_dirAngles;
+}
 
 //------------------------------------------------------------------------------------------------------------------------------------
 //Main part of the function
@@ -398,7 +495,7 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 	//pos_row = LONG_SIZE - STARTING_ROW;
 	pos_row = STARTING_ROW;
 	pos_col = STARTING_COL;
-	fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
+	fprintf(outTxt,"%f \t %f\n",pos_row,pos_col);
 	if(pos_row >= MAX_LAT_SOUTH){
 		printf("\t\tProvided starting row is below the southern most lattitude at which the model is set to stop\n");
 		printf("\t\tEither change the #defines for STARTING_ROW and or MAX_LAT\n");
@@ -428,9 +525,6 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 	float u_val,v_val,precip_val,v_ten,u_ten;
 	int skip;
 	skip=0;
-	//skip_size = 120174
-	
-	//fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
 
 	printf("i \t l \t k \t precipData \t profit_value \t pos_row \t pos_col \t (v_val,u_val)\n");
 	i = skip_size +pos_row * LAT_SIZE + pos_col;
@@ -458,7 +552,7 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 		dirAngleFromFile = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
 		dirAngle = WrappedNormal(dirAngleFromFile,STD_BIRDANGLE);
 		actualAngle = dirAngle;
-
+/*
 		if(dirAngle <= 90){
 			dirAngle = 90 - dirAngle;
 			dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
@@ -479,6 +573,10 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 			dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
 			dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
 		}
+*/
+		dir_u = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[0];
+		dir_v = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[1];
+
 
 		printf("10 profit value::%f\n",getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v));
 		printf("pressure value::%f,slope value::%f\n",last_pressure,slope);
@@ -523,27 +621,8 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 				//The grid is upside down; y increases from top to bottom while x increases from left to right 
 				//dir_v and dir_u are the x and y components of the wind (v=y,u=x)
 
-				if(dirAngle <= 90){//Checked OK
-					dirAngle = 90 - dirAngle;
-					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
-					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
-				}
-				else if((dirAngle > 90) && (dirAngle <= 180)){//Checked OK
-					dirAngle -= 90;
-					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
-					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180));
-				}
-				else if((dirAngle > 180) && (dirAngle <= 270)) {
-					dirAngle = 270 - dirAngle;
-					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180)) * -1;
-					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
-				}
-				else if((dirAngle > 270) && (dirAngle <= 360)){
-					dirAngle -= 270;
-					dir_v = DESIRED_SPEED * sin(dirAngle * (PI/180));
-					dir_u = DESIRED_SPEED * cos(dirAngle * (PI/180)) * -1;
-				}
-
+				dir_u = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[0];
+				dir_v = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[1];
 
 				//Bilinear interpolation for u and v data
 				u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
@@ -601,9 +680,9 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 			}
 //-------------------------------------------End of the 6 hour bird flight------------------------------------------------------------------------------------
 
-
+//-------------------------------------------If bird at sea at the end of the 6 hour flight-------------------------------------------------------------------
 			lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==0?printf("Bird is at Sea!!\n"):printf("Bird not at Sea\n");
-
+/*
 			//If birds are found at sea after 6 hours of flight
 			if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==0){
 				int count_timesteps = 0;
@@ -611,7 +690,6 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 				fprintf(outTxt,"%f \t %f \t %f \t %f \t At Sea!! \n",pos_row,pos_col,u_val,v_val);
 				printf("At sea\n");
 
-				//while((lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_row))]==0)&&(count_timesteps < 18)){
 				while(loop_check == 0){
 					//Bilinear interpolation for u and v data
 					u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
@@ -621,8 +699,6 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 					//will not fly west
 					pos_row = pos_row + (v_val)*0.36*-1;	
 					pos_col = pos_col + (u_val - DESIRED_SPEED) * 0.36;
-					
-
 					
 					l++;
 					count_timesteps++;
@@ -655,6 +731,7 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 				//Going back to the time of the day when the birds start their flight
 				l+=18;
 			}
+*/
 		}
 //*********************End of profit value check at ground; Or for V10 and U10********************************************************************
 //************************************************************************************************************************************************		
@@ -715,8 +792,9 @@ void get_movementData(FILE* outTxt,long l,float* udata,float* vdata,float* dirDa
 	//fprintf(outTxt,"----------------------------------------------------------\n");
 }
 
-
-
+/*
+########################################################################################################################################################################################
+*/
 
 //--------------------------------------------------------------------------------------------------------------------------
 					//Main 
@@ -872,13 +950,13 @@ int main(int argc,char* argv[])
 		return -1;
 	}
 //--------------------------Opening Land vs Water File---------------------//
-	lwTxt = fopen("lw_crop.txt","r");
+	lwTxt = fopen("./Lw_and_Dir/land_water_detail.txt","r");
 	if(lwTxt == NULL) {
 		perror("Cannot open file with direction data\n");
 		return -1;
 	}
 //--------------------------Opening Direction file (Example: ext_crop.txt or extP_crop.txt)-------------//
-	dirTxt = fopen("extP_cropnew.txt","r");
+	dirTxt = fopen("./Lw_and_Dir/ext_detail.txt","r");
 	//dirTxt = fopen("ext_crop.txt","r");
 	if(dirTxt == NULL) {
 		perror("Cannot open file with direction data\n");
