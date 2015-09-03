@@ -55,11 +55,11 @@
 	
 #define DESIRED_SPEED		10.5	//Air speed; Desired speed = flightspeed + windspeed ; Only used in windprofit calculation
 
-#define STD_BIRDANGLE		15	//Standard deviation * 6 = the total difference from max to min angle possible
+#define STD_BIRDANGLE		10	//Standard deviation * 6 = the total difference from max to min angle possible
 					//If STD_BIRDANGLE = 10 then the angle can differ +- (10*6)/2 = +- 30 from mean
 #define	glCompAcc		1e-8	//If the difference is equal to or less than this then equal
 
-#define MIN_PROFIT		-7
+#define MIN_PROFIT		-10
 //Defining the x-variable size, it's sum and
 //sum of squares as needed for slope calculation
 
@@ -567,7 +567,7 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 	//pos_row = LONG_SIZE - STARTING_ROW;
 	pos_row = STARTING_ROW;
 	pos_col = STARTING_COL;
-	fprintf(outTxt,"%f \t %f\n",pos_row,pos_col);
+	//fprintf(outTxt,"%f \t %f\n",pos_row,pos_col);
 	if(pos_row >= MAX_LAT_SOUTH){
 		printf("\t\tProvided starting row is below the southern most lattitude at which the model is set to stop\n");
 		printf("\t\tEither change the #defines for STARTING_ROW and or MAX_LAT\n");
@@ -1134,7 +1134,7 @@ int main(int argc,char* argv[])
 			}
 			else if(i == (LONG_SIZE - 1)){
 				strcpy(tempVal,startPtr);
-				Value = atof(tempVal);
+				Value = atof(tempVal);http://unix.stackexchange.com/questions/117605/ls-command-output-to-file
 				udata[j * LAT_SIZE + i] = Value;
 				
 			}
@@ -1386,7 +1386,7 @@ int main(int argc,char* argv[])
 		//STARTING_ROW = rows[i];
 		//STARTING_COL = cols[i];
 		
-		fprintf(posdataTxt,"Starting location(row,col) = (%f,%f) \n Starting Day = %s %s %s\n",STARTING_ROW,STARTING_COL,argv[1],argv[2],argv[3]);
+		//fprintf(posdataTxt,"Starting location(row,col) = (%f,%f) \n Starting Day = %s %s %s\n",STARTING_ROW,STARTING_COL,argv[1],argv[2],argv[3]);
 		get_movementData(posdataTxt,starting_row,starting_col,offset_into_data,udata,vdata,dirData,precipData,pressureData,u10data,v10data,lwData,start_date);
 	//}
 
