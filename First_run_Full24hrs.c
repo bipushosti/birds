@@ -33,8 +33,7 @@
 #define TIMESTEPS_PER_DAY	24
 #define TIMESTEPS		TOTAL_DAYS*TIMESTEPS_PER_DAY
 #define SKIP_TIMESTEPS		0
-#define STARTING_ROW		122.0
-#define STARTING_COL		252.0
+
 
 //This is with respect to 0 UTC or pm. If set as negative then the hour the birds take off will be 7pm minus the number.
 //If positive then plus the number. Example, if set at -1, then the birds fly at 6pm so for the first day or AUG 1 they 
@@ -109,7 +108,7 @@ int convert_to_month(char* month,char* day);
 char** date_from_days(char** date,long timeStep);
 //int flight_over_water(int* lw_grid,float row_pos,float col_pos);
 float * get_u_v_dirAngle(float dirAngle,float speed);
-float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* vdata,float* dirData,float pos_row,float pos_col,int index,long l,char* start_date);
+float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* vdata,float* dirData,float* precipData,float pos_row,float pos_col,int index,long l,char* start_date,float starting_row,float starting_col);
 //-------------------------------------------------------------------------------------------------------------------------------------
 							//Functions
 //------------------------------------------------------------------------------------------------------------------------------------
@@ -125,11 +124,12 @@ float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* 
  * @return An array containing the new values for position of the bird
 */
 
-float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* vdata,float* dirData,float pos_row,float pos_col,int index,long l,char* start_date)
+float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* vdata,float* dirData,float* precipData,float pos_row,float pos_col,int index,long l,char* start_date,float starting_row,float starting_col)
 {
 	
 	static float ret_data[3] = {0}; // ret_data[0] = new l value, 1 = new pos_row value , 2 = new pos_col
-	float dir_u,dir_v,u_val,v_val,dirAngle;
+	float dir_u,dir_v,u_val,v_val,dirAngle,precip_val,distance;
+	float prev_row,prev_col,wind_Speed,bird_AirSpeed;
 	char *location;
 
 	//Index shows where the birds is currently at, Sea, Land or Fresh Water
@@ -145,6 +145,13 @@ float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* 
 	u_val = 0;
 	dir_u = 0;
 	dir_v = 0;
+
+
+	char** date;
+	date = malloc(2*sizeof(char*));
+	date[0] = malloc(5*sizeof(char));
+	date[1] = malloc(5*sizeof(char));
+
 
 	if(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==index){
 
@@ -162,19 +169,37 @@ float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* 
 				dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
 				dirAngle = WrappedNormal(dirAngle,STD_BIRDANGLE);
 			}
+		
+			prev_row = pos_row;
+			prev_col = pos_col;
 
 			dir_u = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[0];
 			dir_v = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[1];
+
+			wind_Speed = sqrt(u_val * u_val + v_val * v_val);
+			bird_AirSpeed = sqrt((u_val+dir_u)*(u_val+dir_u) +(v_val+dir_v)*(v_val+dir_v));
+
+
+
 			//Desired speed needs to change in the case of column position or the birds
 			//will not fly west
 			pos_row = pos_row + (v_val + dir_v) * 0.36 * -1;	
 			pos_col = pos_col + (u_val + dir_u) * 0.36;
-	
+			
+			precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
+
+			date =  date_from_days(date,(l+1)/24);
 			//l++;
 			//count_timesteps++;
 
-			fprintf(posFile,"%s\t %f \t %f \t %f \t %f \t %f \t %f \t At %s!! \n",start_date,STARTING_ROW,STARTING_COL,pos_row,pos_col,u_val,v_val,location);
-			
+			//fprintf(posFile,"%s\t %f \t %f \t %f \t %f \t %f \t %f \t At %s!! \n",start_date,STARTING_ROW,STARTING_COL,pos_row,pos_col,u_val,v_val,location);
+
+			distance = sqrt((pos_row - prev_row)*(pos_row - prev_row) + (pos_col - prev_col)*(pos_col - prev_col));
+
+			fprintf(posFile,"%s\t %f \t %f \t %f \t %f \t %f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s\tAt %s\n",start_date,starting_row,starting_col,pos_row,pos_col,u_val,v_val,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,date[0],date[1],location);
+
+
+
 			if(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))] == 1){
 				//loop_check = 1;
 				break;
@@ -216,6 +241,9 @@ float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* 
 		ret_data[2] = -1.0;
 	}
 	
+	free(date[0]);
+	free(date[1]);
+	free(date);
 
 	return ret_data;
 }
@@ -555,22 +583,25 @@ float * get_u_v_dirAngle(float dirAngle,float speed)
 //Main part of the function
 void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,float* udata,float* vdata,float* dirData, float* precipData,float* pressureData,float* u10data,float* v10data,int* lwData,char* start_date)
 {
-	fprintf(outTxt,"start_date \t starting_row \t starting_col \t pos_row \t pos_col \t u_val \t\t v_val \t\t dir_u \t\t dir_v \t\t u_air \t\t v_air \t\t bird_GS \t wind_Speed \t distance \t l \t days\n");
+	fprintf(outTxt,"start_date\tstarting_row\tstarting_col\tpos_row\tpos_col\tu_val\tv_val\tdir_u\tdir_v\tu_air\tv_air\tbird_GS\twind_Speed\tdistance\tl\tdays\n");
 	float distance,prev_row,prev_col,bird_AirSpeed,wind_Speed;
 	distance = 0;
 	bird_AirSpeed = 0;
 	wind_Speed = 0;
-	prev_row = STARTING_ROW;
-	prev_col = STARTING_COL;
+	
 
 	float pos_row,pos_col;
 	//pos_row = LONG_SIZE - STARTING_ROW;
-	pos_row = STARTING_ROW;
-	pos_col = STARTING_COL;
+
+	pos_row = starting_row;
+	pos_col = starting_col;
+	prev_row = starting_row;
+	prev_col = starting_col;
+
 	//fprintf(outTxt,"%f \t %f\n",pos_row,pos_col);
 	if(pos_row >= MAX_LAT_SOUTH){
 		printf("\t\tProvided starting row is below the southern most lattitude at which the model is set to stop\n");
-		printf("\t\tEither change the #defines for STARTING_ROW and or MAX_LAT\n");
+		printf("\t\tEither change the starting row location and/or MAX_LAT upto which the birds can fly\n");
 		return;
 	}
 	int k;
@@ -715,7 +746,7 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 				printf("(u_val,v_val)::(%f,%f)\n",u_val,v_val);
 
 				//profit_value = getProfitValue(u_val,v_val,actualAngle,dir_u,dir_v);
-				//precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
+				precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
 
 
 //Adding precip value
@@ -748,7 +779,9 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 //-------------------------------------------------------------------------------------------------------------------------------------------------------------------------	
 
 
-				
+				prev_col = pos_col;
+				prev_row = pos_row;
+
 				//Position is in a 10 km grid. This means for 1m/s, the 
 				//position change in 1 hour is 3.6km/10 = 0.36units in the grid
 
@@ -759,12 +792,13 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 				//tmp = sqrtf((v_val+dir_v)*(v_val+dir_v) + (u_val+dir_u)*(u_val+dir_u));
 				//printf("\nTailComponent::%f,Speed::%f,dir_v::%f,dir_u::%f\n",tailComponent,tmp,dir_v,dir_u);
 			
-				printf("%s\t %f \t %f \t %ld \t %ld \t %d \t %f \t %f \t %.6f \t %.6f \t (%.6f,%.6f)\n",start_date,STARTING_ROW,STARTING_COL,i,l,k,precip_val,profit_value,pos_row,pos_col,v_val,u_val);
+				printf("%s\t %f \t %f \t %ld \t %ld \t %d \t %f \t %f \t %.6f \t %.6f \t (%.6f,%.6f)\n",start_date,starting_row,starting_col,i,l,k,precip_val,profit_value,pos_row,pos_col,v_val,u_val);
 			
+
+				
 				//fprintf(outTxt,"%f,%f\n",pos_row,pos_col);
 				distance = sqrt((pos_row - prev_row)*(pos_row - prev_row) + (pos_col - prev_col)*(pos_col - prev_col));
-				prev_col = pos_col;
-				prev_row = pos_row;
+				
 		
 				wind_Speed = sqrt(u_val * u_val + v_val * v_val);
 				bird_AirSpeed = sqrt((u_val+dir_u)*(u_val+dir_u) +(v_val+dir_v)*(v_val+dir_v));
@@ -775,7 +809,7 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 
 
 				//Distance is in absolute value (kilometers rather than in units of grid points)
-				fprintf(outTxt,"%s\t %f \t %f \t %f \t %f \t %f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s\n",start_date,STARTING_ROW,STARTING_COL,pos_row,pos_col,u_val,v_val,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,date[0],date[1]);
+				fprintf(outTxt,"%s\t %f \t %f \t %f \t %f \t %f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s\n",start_date,starting_row,starting_col,pos_row,pos_col,u_val,v_val,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,date[0],date[1]);
 				
 				if(pos_row >=  MAX_LAT_SOUTH){
 					printf("\t\tBird reached or passed the southern most lattitude\n");
@@ -806,18 +840,26 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 					pos_row = pos_row + (v_val + dir_v)*0.36* -1;
 					pos_col = pos_col + (u_val + dir_u)*0.36;
 
+					wind_Speed = sqrt(u_val * u_val + v_val * v_val);
+					bird_AirSpeed = sqrt((u_val+dir_u)*(u_val+dir_u) +(v_val+dir_v)*(v_val+dir_v));
+
+					distance = sqrt((pos_row - prev_row)*(pos_row - prev_row) + (pos_col - prev_col)*(pos_col - prev_col));
 
 					date =  date_from_days(date,l);
 
 
 
-					printf("%s\t%f\t%f\t%ld\t%ld\t%d\t%f\t%f\t%.6f\t%.6f\t (%.6f,%.6f)\n",start_date,STARTING_ROW,STARTING_COL,i,l,k,precip_val,profit_value,pos_row,pos_col,v_val,u_val);
-					fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t\t%s %sDuring the additional 4 hours \n",start_date,STARTING_ROW,STARTING_COL,pos_row,pos_col,u_val,v_val,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,date[0],date[1]);
+					printf("%s\t%f\t%f\t%ld\t%ld\t%d\t%f\t%f\t%.6f\t%.6f\t (%.6f,%.6f)\n",start_date,starting_row,starting_col,i,l,k,precip_val,profit_value,pos_row,pos_col,v_val,u_val);
+					
+
+					//fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t\t%s %sDuring the additional 4 hours \n",start_date,starting_row,starting_col,pos_row,pos_col,u_val,v_val,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,date[0],date[1]);
+
+					fprintf(outTxt,"%s\t %f \t %f \t %f \t %f \t %f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s\tAt Sea (4hrs)\n",start_date,starting_row,starting_col,pos_row,pos_col,u_val,v_val,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,date[0],date[1]);
 				}
 			}
 
 			if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==0){
-				ret_values = check_bird_location(outTxt,lwData,udata,vdata,dirData,pos_row,pos_col,0,l,start_date);
+				ret_values = check_bird_location(outTxt,lwData,udata,vdata,dirData,precipData,pos_row,pos_col,0,l,start_date,starting_row,starting_col);
 				in_water = 1;
 			}
 			else if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==1){
@@ -825,7 +867,7 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 				l = (l-k) + ((STOPOVER_DAYS+1) * 24);
 			}
 			else if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==2){	
-				ret_values = check_bird_location(outTxt,lwData,udata,vdata,dirData,pos_row,pos_col,2,l,start_date);
+				ret_values = check_bird_location(outTxt,lwData,udata,vdata,dirData,precipData,pos_row,pos_col,2,l,start_date,starting_row,starting_col);
 				in_water = 1;
 			}
 
@@ -923,6 +965,7 @@ int main(int argc,char* argv[])
 	int starting_time = 0;
 
 	printf("\n\tStart date provided is %s %s %s\n\n",argv[1],argv[2],argv[3]);	
+	printf("\n\tStart position is %s %s\n\n",argv[4],argv[5]);
 
 
 	if(argc < 6){
@@ -936,6 +979,12 @@ int main(int argc,char* argv[])
 
 	starting_row = atof(argv[4]);
 	starting_col = atof(argv[5]);
+	//#undef STARTING_ROW	
+	//#define RADIUS starting_row
+//
+	//#undef STARTING_COL
+	//#define RADIUS starting_col
+
 	//starting_time = atoi(argv[6]);
 
 	//Getting the offset into the data so that user can specify a starting date

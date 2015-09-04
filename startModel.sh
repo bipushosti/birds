@@ -93,7 +93,7 @@ replace_inCoords()
 				while (($coordsIdx < ${#Coords[@]}))
 				do
 #					coordsIdx2 = $(( coordsIdx + 1 ))
-	        			./birds ${Dates[index]} ${Coords[coordsIdx]} ${Coords[coordsIdx++]}
+	        			./birds ${Dates[index]} ${Coords[coordsIdx]} ${Coords[coordsIdx+1]}
 					(( coordsIdx+=2 ))
 
 				done
