@@ -1,4 +1,6 @@
 
+//Needs Header Files for the functions; The header file should have both C and CUDA functions
+
 
 
 //This file uses 6 hourly data. Each day is 6 hours long and skipping a day means to add 6
@@ -14,6 +16,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
+#include <pthread.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
@@ -104,8 +107,35 @@ Precipitation = millimeters
 __global__ void WrappedNormal (float* MeanAngle,float AngStdDev,float* );
 __global__ void setup_kernel(unsigned int seed,curandState *states);
 __global__ void generate_kernel(curandState *states,float* numbers,float* angles);
+__global__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v);
+__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* u10data,float* dirData,float* precipData,float* pressureData,float* lwData);
 
+void read_dataFiles(FILE* textFile,float* dataArray);
+long convert_to_month(char* month,char * day);
 //-------------------------------------------------------------------------------------------------------------------------------------
+struct file_IO {
+	FILE *fp;
+	float* inpVals;
+}inpStruct[8]; 
+//-------------------------------------------------------------------------------------------------------------------------------------
+//Global Variables
+
+float* dirData;
+float* udata;
+float* vdata;
+
+float* dir_u;
+float* dir_v;
+
+float* u10data;
+float* v10data;
+
+float* precipData;
+float* pressureData;
+float* lwData;
+
+//-------------------------------------------------------------------------------------------------------------------------------------	
+
 __global__ void setup_kernel(unsigned int seed,curandState *states)
 {
 
@@ -118,7 +148,7 @@ __global__ void setup_kernel(unsigned int seed,curandState *states)
 	curand_init(seed,id,0,&states[id]);
 }
 //-------------------------------------------------------------------------------------------------------------------------------------
-__global__ void generate_kernel(curandState *states,float* numbers,float* angles)
+__global__ void generate_kernel(curandState *states,float* numbers,float* angles,float* u_dirAngles,float* v_dirAngles,float speed)
 {
 
 	//Thread indices
@@ -134,8 +164,9 @@ __global__ void generate_kernel(curandState *states,float* numbers,float* angles
 	if(id > (LONG_SIZE*LAT_SIZE -1)) return;
 	else{
 		
-	
-//		value = STD_BIRDANGLE * z + MeanAngle[id];
+		u_dirAngles[id] = speed * cosf(angles[id] * (PI/180));
+		v_dirAngles[id] = speed * sinf(angles[id] * (PI/180));
+
 		value = STD_BIRDANGLE * numbers[id] + angles[id];
 
 		if ((value - 360) > (-glCompAcc)){ 
@@ -150,63 +181,93 @@ __global__ void generate_kernel(curandState *states,float* numbers,float* angles
 	}
 }
 
-
-//-------------------------------------------------------------------------------------------------------------------------------------
-/*
-__global__ void WrappedNormal (float* MeanAngle,float AngStdDev){
+//------------------------------------------------------------------------------------------------------------------------------------
 
 
-	//Fisher 1993 pg. 47-48
-	//s = -2.ln(r)
-
-	float value;
+__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* u10data,float* dirData,float* precipData,float* pressureData,float* lwData)
+{
 
 	//Thread indices
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 
 	int id = y * LONG_SIZE + x;
-	
-	if(id > (LONG_SIZE*LAT_SIZE -1)) return;
-	else{
-		
-	
-		value = AngStdDev * z + MeanAngle[id];
 
-		if ((value - 360) > (-glCompAcc)){ 
-		    value = value - 360;
-		}
-	 
-		if (value < 0){
-		    value= 360 + value;
-		}
-		MeanAngle[id] = value;
-		//printf("(x,y) = %d,%d,Value = %f \n",x,y,value);
+
+	if(pos_row >= MAX_LAT_SOUTH){
+		printf("\t\tProvided starting row is below the southern most lattitude at which the model is set to stop\n");
+		printf("\t\tEither change the starting row location and/or MAX_LAT upto which the birds can fly\n");
+		return;
 	}
+	
 }
-*/
-//-------------------------------------------------------------------------------------------------------------------------------------
-int main()
+
+//------------------------------------------------------------------------------------------------------------------------------------
+
+__global__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v)
 {
 
-//--------------------------Opening Direction file (Example: ext_crop.txt or extP_crop.txt)-------------//
+	//printf("\n Input DirVal = %f\n",dirVal);
+	//All wind data in m/s
+	float angle,diffAngle,magnitude,magnitude_squared;
 
-	FILE* dirTxt;
-//--------------------------Memory Allocation-----------------------------------//
-	float* dirData;
-	dirData = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));	
+	//vectAngle = angle between the wind vector and the vector orthogonal to the direction vector; or the crosswind vector
+	float tailComponent,vectAngle,crossComponent,profit_value;
+	tailComponent = 0;
 
-	//float* result;
-	//result = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
+	
+	magnitude = hypotf(u_val,v_val);
+	magnitude_squared = magnitude * magnitude;
 
-//--------------------------Opening Direction file (Example: ext_crop.txt or extP_crop.txt)-------------//
-	dirTxt = fopen("./Lw_and_Dir/ext_Final.txt","r");
-	//dirTxt = fopen("ext_crop.txt","r");
-	if(dirTxt == NULL) {
-		perror("Cannot open file with direction data\n");
-		return -1;
+	//Getting the tail component of the wind; or the component of the wind in the desired direction of flight
+	//From formula of getting the vector projection of wind onto the desired direction
+	tailComponent = (dir_v * v_val + dir_u * u_val);
+	tailComponent = tailComponent/hypotf(u_val,v_val);
+	//Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds
+
+	diffAngle = acosf( (u_val*dir_u + v_val * dir_v)/ (( hypotf(u_val,v_val) * hypotf(dir_u,dir_v) )) ) * 180/PI;
+
+	if(tailComponent <= DESIRED_SPEED) {
+		//profit_value = getProfitValue(u_val,v_val,actualAngle);
+
+		//DiffAngle is the angle between the desired direction of the bird 
+		//and the direction of the wind
+		//DiffAngle has to be calculated such that both the vectors are pointing
+		//away from where they meet.
+
+		
+		
+		profit_value = (DESIRED_SPEED * DESIRED_SPEED) + magnitude_squared - 2 * DESIRED_SPEED * magnitude * cosf(diffAngle * PI/180);
+		profit_value = DESIRED_SPEED - sqrtf(profit_value);
+
+		printf("dirVal = %f,angle= %f,diffAngle = %f\n",dirVal,angle,diffAngle);
 	}
-//--------------------------Direction file code end-------------------------------------------------------------------//
+	else {
+		//vectAngle = (dir_v * v_val + dir_u * u_val);
+		//vectAngle = acos(vectAngle / sqrtf((u_val*u_val + v_val* v_val)*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);
+		//vectAngle = (vectAngle <= 90)? 90 - vectAngle: vectAngle - 90;
+		crossComponent = sqrtf(u_val*u_val + v_val*v_val)/cos(vectAngle);
+		//Getting the absolute value
+		crossComponent = (crossComponent<0)? crossComponent * (-1):crossComponent;
+		profit_value = tailComponent - crossComponent;
+		printf("Over the Desired Speed\n");
+	}
+
+	return profit_value;
+}
+//-------------------------------------------------------------------------------------------------------------------------------------
+static void* read_dataFiles(void* arguments)
+{
+
+	struct file_IO *inputArgs;
+	inputArgs = (struct file_IO *)arguments;
+
+	FILE* textFile;
+	float* dataArray;
+
+	textFile = inputArgs->fp;
+	dataArray = inputArgs->inpVals;
+
 	char line[LINESIZE];
 	memset(line,'\0',sizeof(line));
 	char tempVal[15];
@@ -218,14 +279,12 @@ int main()
 	i=0;
 	j=0;
 
-
-//-----------------------------------Reading Direction Values---------------------------------//
 	memset(line,'\0',sizeof(line));
 	memset(tempVal,'\0',sizeof(tempVal));
 	i=0;
 	j=0;
 
-	while(fgets(line,LINESIZE,dirTxt)!=NULL){
+	while(fgets(line,LINESIZE,textFile)!=NULL){
 		startPtr = line;
 		for(i=0;i<LONG_SIZE;i++){
 			Value = 0;
@@ -242,7 +301,7 @@ int main()
 					Value = atof(tempVal);
 				}
 
-				dirData[j * LAT_SIZE + i] = Value;
+				dataArray[j * LAT_SIZE + i] = Value;
 				endPtr = endPtr + 1;
 				startPtr = endPtr;
 				//printf("%d,%f ",i,Value);
@@ -257,13 +316,253 @@ int main()
 				else{
 					Value = atof(tempVal);
 				}
-				dirData[j * LAT_SIZE + i] = Value;
+				dataArray[j * LAT_SIZE + i] = Value;
 				//printf("%d,%f \n",i,Value);
 			}
 		}
 		j++;
 	}
-//---------------------------------------------------------------------------------------------------------
+	return NULL;
+}
+//-------------------------------------------------------------------------------------------------------------------------------------
+long convert_to_month(char* month,char * day)
+{
+	long index,offset;
+	if(strcmp(month,"AUG")==0){
+		index = 1; //The data starts in august
+	}
+	else if(strcmp(month,"SEPT")==0){
+		index = 32; //The data for september starts after 31 days of august
+	}
+	else if(strcmp(month,"OCT")==0){
+		index = 62; //The data for october starts after 31+30 days of sept and august respectively.
+	}
+	else if(strcmp(month,"NOV")==0){
+		index = 93; //The data for october starts after 31+30+31 days of sept,aug and oct respectively.
+	}
+	else{
+		printf("\n\t\tIncorrect month used\n\t\tUse between August-November inclusive; Only use abbriviated caps of the months; august = AUG\n");
+		return -1;
+	}
+	
+	offset = ((index-1)  + atoi(day))* TIMESTEPS_PER_DAY;
+	return offset;
+
+}
+
+
+
+
+//-------------------------------------------------------------------------------------------------------------------------------------
+int main(int argc,char* argv[])
+{
+
+//--------------------------Checking for input arguments------------------------------//
+
+	char baseFileName[] = "../../Birds_Full/Birds_data/InterpolatedData/";
+	char yearFileName[80];
+	char fullFileName[80];
+	char start_date[12];
+
+	float starting_row,starting_col;
+
+	printf("\n\tStart date provided is %s %s %s\n\n",argv[1],argv[2],argv[3]);	
+	printf("\n\tStart position is %s %s\n\n",argv[4],argv[5]);
+
+
+	if(argc < 6){
+		printf("\n\tNot enough arguments; Needed 6 provided %d \n\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes) StartingRowCoordinate StartingColCoordinate StartingTime(24Hrs/Military::::Ignore for now)\n\n",argc - 1);
+		return 0;
+	}
+	else if (argc>6){
+		printf("\n\tToo many arguments; Needed 6 provided %d \n\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes) StartingRowCoordinate StartingColCoordinate StartingTime (Without AM or PM; Or 24Hrs/Military::::Ignore for now)\n\n",argc-1);
+		return 0;
+	}
+
+	starting_row = atof(argv[4]);
+	starting_col = atof(argv[5]);
+
+	//Getting the offset into the data so that user can specify a starting date
+	//l in the get_movement function
+	long offset_into_data = 0;
+	offset_into_data = convert_to_month(argv[2],argv[3]);
+
+	//Checking if correct year specified
+	if((strcmp(argv[1],"2008")==0)||(strcmp(argv[1],"2009")==0)||(strcmp(argv[1],"2010")==0)||(strcmp(argv[1],"2011")==0)||(strcmp(argv[1],"2012")==0)||(strcmp(argv[1],"2013")==0)){
+		//Add file location here
+		strcpy(yearFileName,baseFileName);
+		strcat(yearFileName,argv[1]);
+		strcat(yearFileName,"/");
+	}
+	else{
+		printf("\n\tInvalid year specified\n\tSpecified %s; Use years from 2008 to 2013 in its full format\n",argv[1]);
+		printf("\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes)\n\n");
+		return 0;		
+	}
+
+	strcpy(start_date,argv[1]);
+	strcat(start_date," ");
+	strcat(start_date,argv[2]);
+	strcat(start_date," ");
+	strcat(start_date,argv[3]);
+
+//------------Opening position data file where lat and long data will be stored----------------//
+	
+	FILE *posdataTxt,*vdataTxt,*udataTxt,*v10dataTxt,*u10dataTxt,*precipTxt,*pressureTxt,*lwTxt,*dirTxt;
+	posdataTxt = fopen("posdata.txt","a");
+	if(posdataTxt == NULL) {
+		perror("Cannot open position data file\n");
+		return -1;
+	}
+//----------------------Opening U850 data file----------------------------//
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"U850.txt");
+
+	printf("U50 filename is %s \n",fullFileName);
+	udataTxt = fopen(fullFileName,"r");
+
+	if(udataTxt == NULL) {
+		perror("Cannot open file with U850 data\n");
+		return -1;
+	}
+//------------------------Opening V850 data file--------------------------//
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"V850.txt");
+
+	vdataTxt = fopen(fullFileName,"r");
+
+	if(vdataTxt == NULL) {
+		perror("Cannot open file with V850 data\n");
+		return -1;
+	}
+//-----------------------Opening U10 data file---------------------------//
+	//Birds will check the wind at the surface therefore the u and v
+	//at 10m is required
+	
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"U10.txt");
+
+	u10dataTxt = fopen(fullFileName,"r");
+
+	if(u10dataTxt == NULL) {
+		perror("Cannot open file with U10 data\n");
+		return -1;
+	}
+//-----------------------Opening V10 data file---------------------------//
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"V10.txt");
+
+	v10dataTxt = fopen(fullFileName,"r");
+	
+	if(v10dataTxt == NULL) {
+		perror("Cannot open file with V10 data\n");
+		return -1;
+	}
+//--------------------Opening PRCP data file------------------------------//
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"PRCP.txt");
+
+	precipTxt = fopen(fullFileName,"r");
+	if(precipTxt == NULL) {
+		perror("Cannot open file with PRCP data\n");
+		return -1;
+	}
+//------------------------Opening MSLP data file--------------------------//
+	memset(fullFileName,0,strlen(fullFileName));
+	strcpy(fullFileName,yearFileName);
+	strcat(fullFileName,"MSLP.txt");
+
+	pressureTxt = fopen(fullFileName,"r");
+	if(pressureTxt == NULL) {
+		perror("Cannot open file with pressure data!\n");
+		return -1;
+	}
+//--------------------------Opening Land vs Water File---------------------//
+	lwTxt = fopen("./Lw_and_Dir/land_water_detail.txt","r");
+	if(lwTxt == NULL) {
+		perror("Cannot open file with direction data\n");
+		return -1;
+	}
+//--------------------------Opening Direction file (Example: ext_crop.txt or extP_crop.txt)-------------//
+	dirTxt = fopen("./Lw_and_Dir/ext_Final_NewCoordSystem.txt","r");
+	//dirTxt = fopen("ext_crop.txt","r");
+	if(dirTxt == NULL) {
+		perror("Cannot open file with direction data\n");
+		return -1;
+	}
+
+
+
+//--------------------------Memory Allocation-----------------------------------//
+
+
+	dirData = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));	
+	dir_u = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
+	dir_v = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
+
+	udata = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
+	vdata = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
+	u10data = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
+	v10data = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
+
+	precipData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
+	pressureData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
+	lwData = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
+
+
+
+
+//--------------------------Initializing the structures-------------------------------------------------------------------//
+	inpStruct[0].fp = vdataTxt;
+	inpStruct[0].inpVals = vdata;
+
+	inpStruct[1].fp = udataTxt;
+	inpStruct[1].inpVals = udata;
+
+	inpStruct[2].fp = v10dataTxt;
+	inpStruct[2].inpVals = v10data;
+
+	inpStruct[3].fp = u10dataTxt;
+	inpStruct[3].inpVals = u10data;
+
+	inpStruct[4].fp = precipTxt;
+	inpStruct[4].inpVals = precipData;
+
+	inpStruct[5].fp = pressureTxt;
+	inpStruct[5].inpVals = pressureData;
+
+	inpStruct[6].fp = lwTxt;
+	inpStruct[6].inpVals = lwData;
+
+	inpStruct[7].fp = dirTxt;
+	inpStruct[7].inpVals = dirData;
+
+
+	pthread_t threads[8];
+	int i,j;
+	for(i=0;i<8;i++){
+		if(pthread_create(&threads[i],NULL,read_dataFiles,(void*)&inpStruct[i]) != 0){
+			fprintf(stderr,"ERROR: Thread creation using pthreads failed\n");
+			return -1;
+		}
+
+	}
+
+	for(i=0;i<8;i++){
+		if(pthread_join(threads[i],NULL)!=0){
+ 			fprintf(stderr,"ERROR: Thread join failed\n");
+                        return -1;
+		}
+	}
+//-------------------------If August 1,then it starts at August 2 (because data starts at 7pm but birds fly at 6pm)------------
+	if(strcmp(
+
+//-----------------------------------Getting Wrapped Normal Angles--------------------------------------------------------------
 	curandState_t* states;
 	
 
@@ -274,226 +573,66 @@ int main()
 
 	setup_kernel<<<gridSize,blockSize>>>(time(0),states);
 
-
 	float cpu_nums[LAT_SIZE * LONG_SIZE];
-	float *rand_norm_nums,*d_dirData;
+	float *rand_norm_nums,*d_dirData,*d_u_dirAngle,*d_v_dirAngle;
 
 	cudaMalloc((void**)&rand_norm_nums,LAT_SIZE*LONG_SIZE*sizeof(float));
 	cudaMalloc((void**)&d_dirData,LAT_SIZE*LONG_SIZE*sizeof(float));
+	cudaMalloc((void**)&d_u_dirAngle,LAT_SIZE*LONG_SIZE*sizeof(float));
+	cudaMalloc((void**)&d_v_dirAngle,LAT_SIZE*LONG_SIZE*sizeof(float));
+
 
 	cudaMemcpy(d_dirData,dirData, LAT_SIZE * LONG_SIZE * sizeof(float), cudaMemcpyHostToDevice);
-
-	generate_kernel<<<gridSize,blockSize>>>(states,rand_norm_nums,d_dirData);
-	
+	generate_kernel<<<gridSize,blockSize>>>(states,rand_norm_nums,d_dirData,d_u_dirAngle,d_v_dirAngle,(float)DESIRED_SPEED);
 
 	cudaMemcpy(cpu_nums,rand_norm_nums, LAT_SIZE * LONG_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
-
+	cudaMemcpy(dir_u,d_u_dirAngle,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyDeviceToHost);
+	cudaMemcpy(dir_v,d_v_dirAngle,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyDeviceToHost);
 
 	/* print them out */
-	for (int j = 0; j < LAT_SIZE; j++) {
-		for(int i = 0;i<LONG_SIZE;i++){
-			printf("%f ", cpu_nums[j*LONG_SIZE + i]);
+	for ( j = 0; j < LAT_SIZE; j++) {
+		for( i = 0;i<LONG_SIZE;i++){
+			//printf("%f ", cpu_nums[j*LONG_SIZE + i]);
+			if(i == LONG_SIZE -1) {
+				printf("%f\n",dir_u[j * LAT_SIZE + i]);
+			}
+			else {
+				printf("%f ",dir_u[j * LAT_SIZE + i]);
+			}
 		}
-		printf("\n");
+//		printf("\n");
 	}
+
+
 
 	/* free the memory we allocated for the states and numbers */
 	cudaFree(states);
 	cudaFree(rand_norm_nums);
 	cudaFree(d_dirData);
-
+	cudaFree(d_u_dirAngle);
+	cudaFree(d_v_dirAngle);
 //-----------------------------------------------Freeing allocated memory----------------------------//
-
-	free(dirData);	
-	fclose(dirTxt);
-
-	printf("End\n");
-	return 0;
-}
-
-//-------------------------------------------------------------------------------------------------------------------------------------
-/*
-__global__ void setup_kernel(curandState *state)
-{
-	//Thread indices
-	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-
-	int id = y * LONG_SIZE + x;
-
-	curand_init(1234,id,0,&state[id]);
-}
-//-------------------------------------------------------------------------------------------------------------------------------------
-
-__global__ void generate_kernel(curandState *state,int n,unsigned int *result)
-{
-	//Thread indices
-	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-
-	int id = y * LONG_SIZE + x;
-
-	curandState localState = state[id];
-
-	for(int i = 0; i < n; i++) {
-		x = curand(&localState); // Check if low bit set //
-		if(x & 1) {
-			count++; 
-		}
-	} 
-	// Copy state back to global memory 
-	state[id] = localState; // Store results 
-	result[id] += count;	
-}
-*/
-
-
-//-------------------------------------------------------------------------------------------------------------------------------//
-/*
-int main(int argc,char* argv[])
-{
-	//Setting the output buffer to 500MB
-	size_t limit;
-	cudaDeviceSetLimit(cudaLimitPrintfFifoSize, 500 * 1024 * 1024);	
-	cudaDeviceGetLimit(&limit,cudaLimitPrintfFifoSize);
-//--------------------------Opening Direction file (Example: ext_crop.txt or extP_crop.txt)-------------//
-
-	FILE* dirTxt;
-//--------------------------Memory Allocation-----------------------------------//
-	float* dirData;
-	dirData = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));	
-
-	float* result;
-	result = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
-
-//--------------------------Opening Direction file (Example: ext_crop.txt or extP_crop.txt)-------------//
-	dirTxt = fopen("./Lw_and_Dir/ext_Final.txt","r");
-	//dirTxt = fopen("ext_crop.txt","r");
-	if(dirTxt == NULL) {
-		perror("Cannot open file with direction data\n");
-		return -1;
-	}
-//--------------------------Direction file code end-------------------------------------------------------------------//
-	char line[LINESIZE];
-	memset(line,'\0',sizeof(line));
-	char tempVal[15];
-	memset(tempVal,'\0',sizeof(tempVal));
-	char* startPtr,*endPtr;
-	long j;
-	int i;
-	float Value;
-	i=0;
-	j=0;
-
-
-//-----------------------------------Reading Direction Values---------------------------------//
-	memset(line,'\0',sizeof(line));
-	memset(tempVal,'\0',sizeof(tempVal));
-	i=0;
-	j=0;
-
-	while(fgets(line,LINESIZE,dirTxt)!=NULL){
-		startPtr = line;
-		for(i=0;i<LONG_SIZE;i++){
-			Value = 0;
-			memset(tempVal,'\0',sizeof(tempVal));
-
-			if(i != (LONG_SIZE - 1)) {
-				endPtr = strchr(startPtr,',');
-				strncpy(tempVal,startPtr,endPtr-startPtr);
-				//printf("%s ",tempVal);
-				if(strcmp("NaN",tempVal)==0) {
-					Value = 0.0;
-				}
-				else{
-					Value = atof(tempVal);
-				}
-
-				dirData[j * LAT_SIZE + i] = Value;
-				endPtr = endPtr + 1;
-				startPtr = endPtr;
-				//printf("%d,%f ",i,Value);
-			}
-			else if(i == (LONG_SIZE - 1)){
-				strcpy(tempVal,startPtr);
-				//printf("%s \n",tempVal);
-
-				if(strcmp("NaN\n",tempVal)==0) {
-					Value = 0.0;
-				}
-				else{
-					Value = atof(tempVal);
-				}
-				dirData[j * LAT_SIZE + i] = Value;
-				//printf("%d,%f \n",i,Value);
-			}
-		}
-		j++;
-	}
-*/
-/*
-	for(j=0;j<LAT_SIZE;j++){
-		for(i=0;i<LONG_SIZE;i++){
-			printf("%f ",dirData[j * 429 + i]);
-			if(i == (LONG_SIZE - 1)) printf("\n");
-		}
-	}
-*/
-/*
-//-----------------------------------Execute bird movement function-------------------------------//
-	cudaError_t error;
-	float* d_dirAngles,*d_result;
-	curandState *devState;
 	
-	cudaMalloc((void**)&devState,sizeof(curandState));
-	cudaMalloc((void**)&d_dirAngles,LONG_SIZE * LAT_SIZE * sizeof(float));
-	cudaMalloc((void**)&d_result,LONG_SIZE * LAT_SIZE * sizeof(float));
-
-	cudaMemcpy(d_dirAngles,dirData,LONG_SIZE * LAT_SIZE * sizeof(float),cudaMemcpyHostToDevice);
-
-	dim3 gridSize(1,429,1);
-	dim3 blockSize(512,1,1);
 
 
 
-	WrappedNormal<<<gridSize,blockSize>>>(dirData,STD_BIRDANGLE,devState,result);
-	//error = cudaDeviceSynchronize();
-	//if(error != cudaSuccess)
-  	//{
-	//	printf("CUDA Device Synchronization Error: %s\n", cudaGetErrorString(error));
+	free(udata);
+	free(vdata);
+	free(dir_u);
+	free(dir_v);
 
-    	// we can't recover from the error -- exit the program
-    	//return 0;
-  	//}
-
-	cudaMemcpy(result,d_result,LONG_SIZE * LAT_SIZE * sizeof(int),cudaMemcpyDeviceToHost);
-
-	cudaFree(d_dirAngles);	
-	cudaFree(devState);
-	cudaFree(d_result);
-
-	for(j=0;j<LAT_SIZE;j++){
-		for(i=0;i<LONG_SIZE;i++){
-			printf("%f ",result[j * 429 + i]);
-			if(i == (LONG_SIZE - 1)) printf("\n");
-		}
-	}
-//-----------------------------------------------Freeing allocated memory----------------------------//
-
+	free(u10data);
+	free(v10data);
 	free(dirData);
-	free(result);
-	
-	
+	free(precipData);
+	free(pressureData);
+	free(lwData);
+
 	fclose(dirTxt);
 
 	printf("End\n");
 	return 0;
 }
-*/
-//------------------------------------------------------------------------------------------------------------------------------------
-
-
-
 
 
 
