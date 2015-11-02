@@ -92,8 +92,8 @@
 // the previous day.
 
 //The angle that the bird flies when it is out at sea and needs to get back to land.
-//To make the birds head back directly west the angle must be set to 270.
-#define BIRD_SEA_ANGLE		270
+//To make the birds head back directly west the angle must be set to 180.
+#define BIRD_SEA_ANGLE		180
 //------------------------------Notes---------------------------------------------------------------------------------------
 /*
 Altitude = 850 millibars
@@ -107,8 +107,12 @@ Precipitation = millimeters
 __global__ void WrappedNormal (float* MeanAngle,float AngStdDev,float* );
 __global__ void setup_kernel(unsigned int seed,curandState *states);
 __global__ void generate_kernel(curandState *states,float* numbers,float* angles);
-__global__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v);
-__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* u10data,float* dirData,float* precipData,float* pressureData,float* lwData);
+__device__ float bilinear_interpolation_SmallData(float x,float y,float* data_array);
+__device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,long l);
+
+__device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v);
+__device__ long bird_AtSea(float pos_row,float pos_col,long l,float* udata,float* vdata,float* dir_u,float* dir_v,float* lwData);
+__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* precipData,float* pressureData,float* lwData);
 
 void read_dataFiles(FILE* textFile,float* dataArray);
 long convert_to_month(char* month,char * day);
@@ -184,7 +188,7 @@ __global__ void generate_kernel(curandState *states,float* numbers,float* angles
 //------------------------------------------------------------------------------------------------------------------------------------
 
 
-__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* u10data,float* dirData,float* precipData,float* pressureData,float* lwData)
+__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* precipData,float* pressureData,float* lwData)
 {
 
 	//Thread indices
@@ -193,64 +197,161 @@ __global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,fl
 
 	int id = y * LONG_SIZE + x;
 
+	long int i;
 
-	if(pos_row >= MAX_LAT_SOUTH){
-		printf("\t\tProvided starting row is below the southern most lattitude at which the model is set to stop\n");
-		printf("\t\tEither change the starting row location and/or MAX_LAT upto which the birds can fly\n");
-		return;
-	}
+//	while( i <= (TIMESTEPS-1) * LAT_SIZE * LONG_SIZE ) {
+
+	
 	
 }
 
 //------------------------------------------------------------------------------------------------------------------------------------
+__device__ long bird_AtSea(float pos_row,float pos_col,long l,float* udata,float* vdata,float* lwData)
+{
+	long count_timeSteps = l;
+	float u_val,v_val,u_dir,v_dir;
+	int index = 0;
 
-__global__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v)
+	index = lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))];
+
+	while(index != 1){
+
+		/** Bilinear interpolation for u and v data **/
+		u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l);	
+		v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l);
+	
+		u_dir = DESIRED_SPEED * cosf(BIRD_SEA_ANGLE * (PI/180));
+		v_dir = DESIRED_SPEED * sinf(BIRD_SEA_ANGLE * (PI/180));
+
+		/** Desired speed needs to change in the case of column position or the birds
+		will not fly west **/
+		pos_row = pos_row + (v_val + v_dir) * 0.36 * -1;	
+		pos_col = pos_col + (u_val + u_dir) * 0.36;
+
+		index = lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))];
+
+		count_timeSteps = count_timeSteps + 1;
+
+		if(count_timeSteps > 79){
+			printf("Dead Bird! Bird has been flying for 80 hours straight!\n");
+			return -1;
+		}
+
+		if(pos_row >= MAX_LAT_SOUTH){
+			printf("Bird reached maximum lattitude; Exiting program\n");
+			return -1;
+		}
+	}
+	/** Waiting till next 6pm **/
+	while((count_timeSteps+1) % 24 != 0){
+		/** Add to position arrays**/
+		count_timeSteps ++;
+	}
+	/** Going back to 6pm after certain stopover days **/
+	count_timeSteps = (STOPOVER_DAYS +1)*24 + count_timeSteps - 1 ;
+
+	return count_timeSteps;
+	
+	
+}
+//------------------------------------------------------------------------------------------------------------------------------------
+__device__ float bilinear_interpolation_SmallData(float x,float y,float* data_array)
+{
+	float x1,y1,x2,y2;
+	float value,Q11,Q12,Q21,Q22,R1,R2,R;
+	//float val_x1,val_x2,val_y1,val_y2;
+
+	x1 = floorf(x);
+	x2 = ceilf(x);
+	y1 = floorf(y);
+	y2 = ceilf(y);
+	R = 0;
+	
+	Q11 = data_array[(int)(y1 * LONG_SIZE + x1)];
+	Q12 = data_array[(int)(y2 * LONG_SIZE + x1)];
+	Q21 = data_array[(int)(y1 * LONG_SIZE + x2)];
+	Q22 = data_array[(int)(y2 * LONG_SIZE + x2)];
+	
+
+	R1 = Q11 + (x - x1)*(Q21 - Q11);
+	R2 = Q12 + (x - x1)*(Q22 - Q12);
+	R = R1 + (y - y1)*(R2 - R1);
+
+	
+	//printf("Q11:%f,Q12:%f,Q21:%f,Q22:%f; And Value=%f\n",Q11,Q12,Q21,Q22,value);
+	return R;
+}
+//------------------------------------------------------------------------------------------------------------------------------------
+__device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,long l)
+{
+	float x1,y1,x2,y2;
+	float value,Q11,Q12,Q21,Q22,R1,R2,R;
+	//float val_x1,val_x2,val_y1,val_y2;
+
+	x1 = floorf(x);
+	x2 = ceilf(x);
+	y1 = floorf(y);
+	y2 = ceilf(y);
+	R = 0;
+	
+	Q11 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LONG_SIZE + x1) ];
+	Q12 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y2 * LONG_SIZE + x1) ];
+	Q21 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y1 * LONG_SIZE + x2) ];
+	Q22 = data_array[(int)(l  * LAT_SIZE * LONG_SIZE + y2 * LONG_SIZE + x2) ];
+	
+
+	R1 = Q11 + (x - x1)*(Q21 - Q11);
+	R2 = Q12 + (x - x1)*(Q22 - Q12);
+	R = R1 + (y - y1)*(R2 - R1);
+
+	
+	//printf("Q11:%f,Q12:%f,Q21:%f,Q22:%f; And Value=%f\n",Q11,Q12,Q21,Q22,value);
+	return R;
+}
+//------------------------------------------------------------------------------------------------------------------------------------
+__device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v)
 {
 
-	//printf("\n Input DirVal = %f\n",dirVal);
-	//All wind data in m/s
-	float angle,diffAngle,magnitude,magnitude_squared;
+	/** 
+	All wind data in m/s 
+	**/
+	float diffAngle,magnitude,magnitude_squared,tailComponent,crossComponent,profit_value;
 
-	//vectAngle = angle between the wind vector and the vector orthogonal to the direction vector; or the crosswind vector
-	float tailComponent,vectAngle,crossComponent,profit_value;
 	tailComponent = 0;
-
 	
 	magnitude = hypotf(u_val,v_val);
 	magnitude_squared = magnitude * magnitude;
 
-	//Getting the tail component of the wind; or the component of the wind in the desired direction of flight
-	//From formula of getting the vector projection of wind onto the desired direction
+	/** 
+	Getting the tail component of the wind; or the component of the wind in the desired direction of flight
+	From formula of getting the vector projection of wind onto the desired direction 
+	**/
+
 	tailComponent = (dir_v * v_val + dir_u * u_val);
-	tailComponent = tailComponent/hypotf(u_val,v_val);
-	//Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds
+	tailComponent = tailComponent/hypotf(dir_u,dir_u);
+	
+
+	/** 
+	DiffAngle is the angle between the desired direction of the bird and the direction of the wind
+	DiffAngle has to be calculated such that both the vectors are pointing away from where they meet.
+	Using the formula to get angle between two vectors
+	**/
 
 	diffAngle = acosf( (u_val*dir_u + v_val * dir_v)/ (( hypotf(u_val,v_val) * hypotf(dir_u,dir_v) )) ) * 180/PI;
 
-	if(tailComponent <= DESIRED_SPEED) {
-		//profit_value = getProfitValue(u_val,v_val,actualAngle);
-
-		//DiffAngle is the angle between the desired direction of the bird 
-		//and the direction of the wind
-		//DiffAngle has to be calculated such that both the vectors are pointing
-		//away from where they meet.
-
-		
-		
+	/** 
+	Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds 
+	**/
+	if(tailComponent <= DESIRED_SPEED) {	
 		profit_value = (DESIRED_SPEED * DESIRED_SPEED) + magnitude_squared - 2 * DESIRED_SPEED * magnitude * cosf(diffAngle * PI/180);
 		profit_value = DESIRED_SPEED - sqrtf(profit_value);
-
-		printf("dirVal = %f,angle= %f,diffAngle = %f\n",dirVal,angle,diffAngle);
 	}
 	else {
-		//vectAngle = (dir_v * v_val + dir_u * u_val);
-		//vectAngle = acos(vectAngle / sqrtf((u_val*u_val + v_val* v_val)*(dir_v * dir_v + dir_u * dir_u))) * (180/PI);
-		//vectAngle = (vectAngle <= 90)? 90 - vectAngle: vectAngle - 90;
-		crossComponent = sqrtf(u_val*u_val + v_val*v_val)/cos(vectAngle);
-		//Getting the absolute value
-		crossComponent = (crossComponent<0)? crossComponent * (-1):crossComponent;
+		/** Perpendicular to a vector (x,y) is (y,-x) or (-y,x)
+		Cross component is always positive **/
+
+		crossComponent = fabsf((-dir_v*u_val + dir_u*v_val)/hypotf(dir_v,dir_u));
 		profit_value = tailComponent - crossComponent;
-		printf("Over the Desired Speed\n");
 	}
 
 	return profit_value;
@@ -365,6 +466,7 @@ int main(int argc,char* argv[])
 	char start_date[12];
 
 	float starting_row,starting_col;
+	long offset_into_data = 0;
 
 	printf("\n\tStart date provided is %s %s %s\n\n",argv[1],argv[2],argv[3]);	
 	printf("\n\tStart position is %s %s\n\n",argv[4],argv[5]);
@@ -382,12 +484,22 @@ int main(int argc,char* argv[])
 	starting_row = atof(argv[4]);
 	starting_col = atof(argv[5]);
 
-	//Getting the offset into the data so that user can specify a starting date
-	//l in the get_movement function
-	long offset_into_data = 0;
-	offset_into_data = convert_to_month(argv[2],argv[3]);
+	/** If starting row is greater than or equal the row that we are interested in; Below a particular row we are not interested in the flight of the birds**/
+	if(starting_row >= MAX_LAT_SOUTH){
+		printf("\t\tProvided starting row is below the southern most lattitude at which the model is set to stop\n");
+		printf("\t\tEither change the starting row location and/or MAX_LAT upto which the birds can fly\n");
+		return -1;
+	}
 
-	//Checking if correct year specified
+	/** Converting month and day information into number of timesteps; Special case of AUG 1st is also taken care of**/
+	if((strcmp(argv[2],"AUG")==0) && (strcmp(argv[3],"1")==0)){
+			offset_into_data = 22;
+	}
+	else{
+			offset_into_data = convert_to_month(argv[2],argv[3]);
+	}
+
+	/** Checking if correct year specified **/
 	if((strcmp(argv[1],"2008")==0)||(strcmp(argv[1],"2009")==0)||(strcmp(argv[1],"2010")==0)||(strcmp(argv[1],"2011")==0)||(strcmp(argv[1],"2012")==0)||(strcmp(argv[1],"2013")==0)){
 		//Add file location here
 		strcpy(yearFileName,baseFileName);
@@ -560,7 +672,7 @@ int main(int argc,char* argv[])
 		}
 	}
 //-------------------------If August 1,then it starts at August 2 (because data starts at 7pm but birds fly at 6pm)------------
-	if(strcmp(
+//	if(strcmp(
 
 //-----------------------------------Getting Wrapped Normal Angles--------------------------------------------------------------
 	curandState_t* states;
