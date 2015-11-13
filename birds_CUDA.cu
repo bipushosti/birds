@@ -14,9 +14,14 @@
 #include <time.h>
 #include <sys/time.h>
 #include <stdlib.h>
+#include <getopt.h>
 #include <stdio.h>
 #include <math.h>
 #include <pthread.h>
+
+#define CUDA_API_PER_THREAD_DEFAULT_STREAM
+
+
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
@@ -94,6 +99,11 @@
 //The angle that the bird flies when it is out at sea and needs to get back to land.
 //To make the birds head back directly west the angle must be set to 180.
 #define BIRD_SEA_ANGLE		180
+
+//Total number of data files or variables bird flight depends on
+#define NUM_DATA_FILES		8
+
+#define HANDLE_ERROR( err ) (HandleError( err, __FILE__, __LINE__ ))
 //------------------------------Notes---------------------------------------------------------------------------------------
 /*
 Altitude = 850 millibars
@@ -112,10 +122,13 @@ __device__ float bilinear_interpolation_LargeData(float x,float y,float* data_ar
 
 __device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v);
 __device__ long bird_AtSea(float pos_row,float pos_col,long l,float* udata,float* vdata,float* dir_u,float* dir_v,float* lwData);
-__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* precipData,float* pressureData,float* lwData);
+__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData);
 
 void read_dataFiles(FILE* textFile,float* dataArray);
-long convert_to_month(char* month,char * day);
+long convert_to_month(int month,int day);
+
+static void HandleError( cudaError_t err,const char *file, int line );
+long Get_GPU_devices();
 //-------------------------------------------------------------------------------------------------------------------------------------
 struct file_IO {
 	FILE *fp;
@@ -138,7 +151,58 @@ float* precipData;
 float* pressureData;
 float* lwData;
 
-//-------------------------------------------------------------------------------------------------------------------------------------	
+//###########################################################################################################################################//
+
+static void HandleError( cudaError_t err,const char *file, int line ) {
+    if (err != cudaSuccess) {
+  		printf( "%s in %s at line %d\n", cudaGetErrorString( err ),file, line );
+//		cout << cudaGetErrorString(err) << "in" << file << "at line" << line << "\n";
+        exit( EXIT_FAILURE );
+    }
+}
+
+//###########################################################################################################################################//
+
+long Get_GPU_devices()
+{
+	cudaDeviceProp prop;
+	int whichDevice,DeviceCount;
+	long deviceMemory;
+
+	HANDLE_ERROR(cudaGetDevice(&whichDevice));
+	HANDLE_ERROR(cudaGetDeviceProperties(&prop,whichDevice));
+	
+	if(!prop.deviceOverlap){
+		printf("Device does not handle overlaps so streams are not possible\n");
+	return 0;
+	}
+
+	DeviceCount = 0;
+	
+	HANDLE_ERROR(cudaGetDeviceCount(&DeviceCount));
+	if(DeviceCount > 0){ 
+		printf("%d Devices Found\n",DeviceCount);
+	}else{
+		printf("No devices found or error in reading the number of devices\n");
+		return 0;
+	}
+	
+	int i = 0;
+	//for(int i = 0;i<DeviceCount;i++){
+	cudaDeviceProp properties;
+	HANDLE_ERROR(cudaGetDeviceProperties(&properties,i));
+	printf("Device Number: %d\n", i);
+	printf("  Device name: %s\n", properties.name);
+	printf("  Device Global Memory size: %zd MB \n",properties.totalGlobalMem/1000000);
+	printf("\n");
+	
+	deviceMemory = properties.totalGlobalMem;
+	//}
+
+
+	return deviceMemory;
+}
+//###########################################################################################################################################//
 
 __global__ void setup_kernel(unsigned int seed,curandState *states)
 {
@@ -151,7 +215,9 @@ __global__ void setup_kernel(unsigned int seed,curandState *states)
 
 	curand_init(seed,id,0,&states[id]);
 }
-//-------------------------------------------------------------------------------------------------------------------------------------
+
+//###########################################################################################################################################//
+
 __global__ void generate_kernel(curandState *states,float* numbers,float* angles,float* u_dirAngles,float* v_dirAngles,float speed)
 {
 
@@ -185,27 +251,8 @@ __global__ void generate_kernel(curandState *states,float* numbers,float* angles
 	}
 }
 
-//------------------------------------------------------------------------------------------------------------------------------------
+//###########################################################################################################################################//
 
-
-__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* precipData,float* pressureData,float* lwData)
-{
-
-	//Thread indices
-	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
-	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-
-	int id = y * LONG_SIZE + x;
-
-	long int i;
-
-//	while( i <= (TIMESTEPS-1) * LAT_SIZE * LONG_SIZE ) {
-
-	
-	
-}
-
-//------------------------------------------------------------------------------------------------------------------------------------
 __device__ long bird_AtSea(float pos_row,float pos_col,long l,float* udata,float* vdata,float* lwData)
 {
 	long count_timeSteps = l;
@@ -254,11 +301,13 @@ __device__ long bird_AtSea(float pos_row,float pos_col,long l,float* udata,float
 	
 	
 }
-//------------------------------------------------------------------------------------------------------------------------------------
+
+//###########################################################################################################################################//
+
 __device__ float bilinear_interpolation_SmallData(float x,float y,float* data_array)
 {
 	float x1,y1,x2,y2;
-	float value,Q11,Q12,Q21,Q22,R1,R2,R;
+	float Q11,Q12,Q21,Q22,R1,R2,R;
 	//float val_x1,val_x2,val_y1,val_y2;
 
 	x1 = floorf(x);
@@ -281,11 +330,14 @@ __device__ float bilinear_interpolation_SmallData(float x,float y,float* data_ar
 	//printf("Q11:%f,Q12:%f,Q21:%f,Q22:%f; And Value=%f\n",Q11,Q12,Q21,Q22,value);
 	return R;
 }
-//------------------------------------------------------------------------------------------------------------------------------------
+
+
+//###########################################################################################################################################//
+
 __device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,long l)
 {
 	float x1,y1,x2,y2;
-	float value,Q11,Q12,Q21,Q22,R1,R2,R;
+	float Q11,Q12,Q21,Q22,R1,R2,R;
 	//float val_x1,val_x2,val_y1,val_y2;
 
 	x1 = floorf(x);
@@ -308,13 +360,15 @@ __device__ float bilinear_interpolation_LargeData(float x,float y,float* data_ar
 	//printf("Q11:%f,Q12:%f,Q21:%f,Q22:%f; And Value=%f\n",Q11,Q12,Q21,Q22,value);
 	return R;
 }
-//------------------------------------------------------------------------------------------------------------------------------------
+
+
+
+//###########################################################################################################################################//
+
 __device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v)
 {
 
-	/** 
-	All wind data in m/s 
-	**/
+	/** All wind data in m/s **/
 	float diffAngle,magnitude,magnitude_squared,tailComponent,crossComponent,profit_value;
 
 	tailComponent = 0;
@@ -322,33 +376,26 @@ __device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u
 	magnitude = hypotf(u_val,v_val);
 	magnitude_squared = magnitude * magnitude;
 
-	/** 
-	Getting the tail component of the wind; or the component of the wind in the desired direction of flight
-	From formula of getting the vector projection of wind onto the desired direction 
-	**/
+	/** Getting the tail component of the wind; or the component of the wind in the desired direction of flight
+	From formula of getting the vector projection of wind onto the desired direction **/
 
 	tailComponent = (dir_v * v_val + dir_u * u_val);
 	tailComponent = tailComponent/hypotf(dir_u,dir_u);
 	
 
-	/** 
-	DiffAngle is the angle between the desired direction of the bird and the direction of the wind
+	/** DiffAngle is the angle between the desired direction of the bird and the direction of the wind
 	DiffAngle has to be calculated such that both the vectors are pointing away from where they meet.
-	Using the formula to get angle between two vectors
-	**/
+	Using the formula to get angle between two vectors **/
 
 	diffAngle = acosf( (u_val*dir_u + v_val * dir_v)/ (( hypotf(u_val,v_val) * hypotf(dir_u,dir_v) )) ) * 180/PI;
 
-	/** 
-	Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds 
-	**/
+	/** Separate profit value methods have to be used if the tail component is less that equal to or greater than the desired speed of the birds **/
 	if(tailComponent <= DESIRED_SPEED) {	
 		profit_value = (DESIRED_SPEED * DESIRED_SPEED) + magnitude_squared - 2 * DESIRED_SPEED * magnitude * cosf(diffAngle * PI/180);
 		profit_value = DESIRED_SPEED - sqrtf(profit_value);
 	}
 	else {
-		/** Perpendicular to a vector (x,y) is (y,-x) or (-y,x)
-		Cross component is always positive **/
+		/** Perpendicular to a vector (x,y) is (y,-x) or (-y,x) Cross component is always positive **/
 
 		crossComponent = fabsf((-dir_v*u_val + dir_u*v_val)/hypotf(dir_v,dir_u));
 		profit_value = tailComponent - crossComponent;
@@ -356,7 +403,9 @@ __device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u
 
 	return profit_value;
 }
-//-------------------------------------------------------------------------------------------------------------------------------------
+
+//###########################################################################################################################################//
+
 static void* read_dataFiles(void* arguments)
 {
 
@@ -425,36 +474,122 @@ static void* read_dataFiles(void* arguments)
 	}
 	return NULL;
 }
-//-------------------------------------------------------------------------------------------------------------------------------------
-long convert_to_month(char* month,char * day)
+
+//###########################################################################################################################################//
+
+long convert_to_month(int month,int day)
 {
 	long index,offset;
-	if(strcmp(month,"AUG")==0){
+	if(month == 8){
 		index = 1; //The data starts in august
 	}
-	else if(strcmp(month,"SEPT")==0){
+	else if(month == 9){
 		index = 32; //The data for september starts after 31 days of august
 	}
-	else if(strcmp(month,"OCT")==0){
+	else if(month == 10){
 		index = 62; //The data for october starts after 31+30 days of sept and august respectively.
 	}
-	else if(strcmp(month,"NOV")==0){
+	else if(month == 10){
 		index = 93; //The data for october starts after 31+30+31 days of sept,aug and oct respectively.
 	}
 	else{
-		printf("\n\t\tIncorrect month used\n\t\tUse between August-November inclusive; Only use abbriviated caps of the months; august = AUG\n");
+		printf("\n\t\tIncorrect month used\n\t\tUse between August-November inclusive; Only use numbers ; August = 8\n");
 		return -1;
 	}
 	
-	offset = ((index-1)  + atoi(day))* TIMESTEPS_PER_DAY;
+	offset = (index-1)  + day* TIMESTEPS_PER_DAY;
 	return offset;
 
 }
 
+//###########################################################################################################################################//
+
+__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData)
+{
+	//Thread indices
+	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
+	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
+
+	int id = y * LONG_SIZE + x;
+
+	long l_old;	
+
+	float profit_value,actualAngle;
+	float last_pressure,pressure_sum,pressure_MultSum,slope;
+	float u_ten,v_ten,u_val,v_val,uDir_value,vDir_value; //precip_val;
+	int k;
+
+	slope = 0;
+
+	while(l < (TOTAL_DAYS * TIMESTEPS_PER_DAY - 24)){
+	
+		/** Rounding down to the nearest int **/
+		uDir_value = dir_u[__float2int_rd(pos_row * LAT_SIZE + pos_col)];
+		vDir_value = dir_v[__float2int_rd(pos_row * LAT_SIZE + pos_col)];
+	
+		u_ten = bilinear_interpolation_LargeData(pos_col,pos_row,u10data,l);
+		v_ten = bilinear_interpolation_LargeData(pos_col,pos_row,v10data,l);
+
+		profit_value = getProfitValue(u_ten,v_ten,actualAngle,uDir_value,vDir_value);
+
+		if((profit_value >= MIN_PROFIT) && ((last_pressure>=1009)||(slope >-1))){
+
+			for(k=0;k<6;k++,l++) {
+				u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l);
+				v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l);
+				//precip_val = bilinear_interpolation_LargeData(pos_col,pos_row,precipData,l);
+
+				pos_row = pos_row + (v_val + vDir_value ) * 0.36 * -1;
+				pos_col = pos_col + (u_val + uDir_value) * 0.36;
+			}	
 
 
+			/** If the bird is at sea after the first 6 hours of flight **/			
+			if(lwData[__float2int_rd(pos_row * LAT_SIZE + pos_col)] != 1){
 
-//-------------------------------------------------------------------------------------------------------------------------------------
+				for(k=6;k<10;k++,l++){
+					/** Rounding down to the nearest int **/
+					uDir_value = dir_u[__float2int_rd(pos_row * LAT_SIZE + pos_col)];
+					vDir_value = dir_v[__float2int_rd(pos_row * LAT_SIZE + pos_col)];
+
+					u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l);
+					v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l);
+
+					pos_row = pos_row + (v_val + vDir_value ) * 0.36 * -1;
+					pos_col = pos_col + (u_val + uDir_value) * 0.36;
+				}
+			}
+
+			/** If at sea even after the 4 hours **/
+			if(lwData[__float2int_rd(pos_row * LAT_SIZE + pos_col)] != 1){
+				l = bird_AtSea(pos_row,pos_col,l,udata,vdata,lwData);
+			}		
+		}
+		else{
+			l += 24;
+		}
+
+		l_old = l - REGRESSION_HRS;
+
+		//Taking the pressure from 6 hours earlier of the location where the bird landed
+		for(k=1; (l_old < l) && (k<=REGRESSION_HRS); l_old++,k++){
+
+			pressure_sum += bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old);
+			pressure_MultSum += k * bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old);
+
+			//last_pressure is the last day or the day of flight
+			if(k == REGRESSION_HRS) {
+				last_pressure = bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old);
+			}
+		}
+		slope = ((REGRESSION_HRS * pressure_MultSum) - (pressure_sum * HRS_SUM))/(DENOM_SLOPE);
+		
+	}
+	
+}
+
+
+//###########################################################################################################################################//
 int main(int argc,char* argv[])
 {
 
@@ -464,59 +599,95 @@ int main(int argc,char* argv[])
 	char yearFileName[80];
 	char fullFileName[80];
 	char start_date[12];
+	char yearStr[4],monthStr[2],dayStr[2];
 
 	float starting_row,starting_col;
 	long offset_into_data = 0;
+	int NumOfBirds,year,day,month;
 
-	printf("\n\tStart date provided is %s %s %s\n\n",argv[1],argv[2],argv[3]);	
-	printf("\n\tStart position is %s %s\n\n",argv[4],argv[5]);
+	int option;
+	
+	while ((option = getopt(argc, argv,"y:m:d:r:c:N:")) != -1) {
+        	switch (option) {
+             		case 'y' : year = atoi(optarg);
+             		    break;
+             		case 'm' : month = atoi(optarg);
+             		    break;
+             		case 'd' : day = atoi(optarg); 
+             		    break;
+             		case 'r' : starting_row = atof(optarg);
+             		    break;
+             		case 'c' : starting_col = atof(optarg);
+             		    break;
+             //		case 't' : breadth = atoi(optarg);
+             //		    break;
+             		case 'N' : NumOfBirds = atoi(optarg);
+             		    break;
+             		default: printf("Usage: birds -y Year -m Month(Number) -d DayOfTheMonth -r StartingRow -c StartingCol -N NumberOfBirds\n"); 
+             		    exit(EXIT_FAILURE);
+        	}
+   	 }
 
-
-	if(argc < 6){
-		printf("\n\tNot enough arguments; Needed 6 provided %d \n\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes) StartingRowCoordinate StartingColCoordinate StartingTime(24Hrs/Military::::Ignore for now)\n\n",argc - 1);
-		return 0;
-	}
-	else if (argc>6){
-		printf("\n\tToo many arguments; Needed 6 provided %d \n\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes) StartingRowCoordinate StartingColCoordinate StartingTime (Without AM or PM; Or 24Hrs/Military::::Ignore for now)\n\n",argc-1);
-		return 0;
-	}
-
-	starting_row = atof(argv[4]);
-	starting_col = atof(argv[5]);
-
+	
 	/** If starting row is greater than or equal the row that we are interested in; Below a particular row we are not interested in the flight of the birds**/
 	if(starting_row >= MAX_LAT_SOUTH){
 		printf("\t\tProvided starting row is below the southern most lattitude at which the model is set to stop\n");
 		printf("\t\tEither change the starting row location and/or MAX_LAT upto which the birds can fly\n");
 		return -1;
 	}
+	
+//-----------------------------------------------Day-----------------------------------------//
+/** Making sure random date is not provided **/
 
-	/** Converting month and day information into number of timesteps; Special case of AUG 1st is also taken care of**/
-	if((strcmp(argv[2],"AUG")==0) && (strcmp(argv[3],"1")==0)){
-			offset_into_data = 22;
-	}
-	else{
-			offset_into_data = convert_to_month(argv[2],argv[3]);
+	if((day>0) && (day<32)){
+		sprintf(dayStr,"%d",day);
+	}else{
+		printf("\t\t Invalid date provided; Date should be greater than 0 and less than 32\n");
+		return -1;
 	}
 
-	/** Checking if correct year specified **/
-	if((strcmp(argv[1],"2008")==0)||(strcmp(argv[1],"2009")==0)||(strcmp(argv[1],"2010")==0)||(strcmp(argv[1],"2011")==0)||(strcmp(argv[1],"2012")==0)||(strcmp(argv[1],"2013")==0)){
+//-----------------------------------------------Month-----------------------------------------//
+/** Making sure month provided is between August and November inclusive **/
+
+	if((month <= 11) && (month >= 8)){
+		sprintf(monthStr,"%d",month);
+	}else{
+		printf("\t\t Invalid month provided; Use between 8 and 11 inclusive\n");
+		return -1;
+	}
+
+	/** Converting month and day information into number of timesteps; Special case of AUG 1st is also taken care of
+	Instead of AUG 1 it starts at August 2 (because data starts at 7pm but birds fly at 6pm) **/
+	if((month == 8) && (day == 1)){
+		offset_into_data = 22;
+	}
+	else {
+		offset_into_data = convert_to_month(month,day);
+	}
+
+//-----------------------------------------------Year-----------------------------------------//
+/** Checking if correct year specified **/
+
+	if((year>= 2008) && (year<=2013)){
+	//if((strcmp(argv[1],"2008")==0)||(strcmp(argv[1],"2009")==0)||(strcmp(argv[1],"2010")==0)||(strcmp(argv[1],"2011")==0)||(strcmp(argv[1],"2012")==0)||(strcmp(argv[1],"2013")==0)){
 		//Add file location here
+		sprintf(yearStr,"%d",year);
 		strcpy(yearFileName,baseFileName);
-		strcat(yearFileName,argv[1]);
+		strcat(yearFileName,yearStr);
 		strcat(yearFileName,"/");
 	}
 	else{
-		printf("\n\tInvalid year specified\n\tSpecified %s; Use years from 2008 to 2013 in its full format\n",argv[1]);
-		printf("\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes)\n\n");
-		return 0;		
+		printf("\n\tInvalid year specified\n\tSpecified %d; Use years from 2008 to 2013 in its full format\n",year);
+             	printf("\t\tUsage: birds -y Year -m Month(Number) -d DayOfTheMonth -r StartingRow -c StartingCol -N NumberOfBirds\n"); 
+		return -1;		
 	}
 
-	strcpy(start_date,argv[1]);
-	strcat(start_date," ");
-	strcat(start_date,argv[2]);
-	strcat(start_date," ");
-	strcat(start_date,argv[3]);
+	strcpy(start_date,yearStr);
+	strcat(start_date,"/");	
+	strcat(start_date,monthStr);
+	strcat(start_date,"/");
+	sprintf(dayStr,"%d",day);
+	strcat(start_date,dayStr);
 
 //------------Opening position data file where lat and long data will be stored----------------//
 	
@@ -607,9 +778,6 @@ int main(int argc,char* argv[])
 		perror("Cannot open file with direction data\n");
 		return -1;
 	}
-
-
-
 //--------------------------Memory Allocation-----------------------------------//
 
 
@@ -625,9 +793,6 @@ int main(int argc,char* argv[])
 	precipData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
 	pressureData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
 	lwData = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
-
-
-
 
 //--------------------------Initializing the structures-------------------------------------------------------------------//
 	inpStruct[0].fp = vdataTxt;
@@ -671,13 +836,9 @@ int main(int argc,char* argv[])
                         return -1;
 		}
 	}
-//-------------------------If August 1,then it starts at August 2 (because data starts at 7pm but birds fly at 6pm)------------
-//	if(strcmp(
-
 //-----------------------------------Getting Wrapped Normal Angles--------------------------------------------------------------
 	curandState_t* states;
 	
-
 	cudaMalloc((void**)&states,LAT_SIZE*LONG_SIZE*sizeof(curandState_t));
 
 	dim3 gridSize(1,LAT_SIZE,1);
@@ -697,12 +858,13 @@ int main(int argc,char* argv[])
 	cudaMemcpy(d_dirData,dirData, LAT_SIZE * LONG_SIZE * sizeof(float), cudaMemcpyHostToDevice);
 	generate_kernel<<<gridSize,blockSize>>>(states,rand_norm_nums,d_dirData,d_u_dirAngle,d_v_dirAngle,(float)DESIRED_SPEED);
 
+//Do not need to get them back at all; Will have to send it back to GPU 
 	cudaMemcpy(cpu_nums,rand_norm_nums, LAT_SIZE * LONG_SIZE * sizeof(float), cudaMemcpyDeviceToHost);
 	cudaMemcpy(dir_u,d_u_dirAngle,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyDeviceToHost);
 	cudaMemcpy(dir_v,d_v_dirAngle,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyDeviceToHost);
 
 	/* print them out */
-	for ( j = 0; j < LAT_SIZE; j++) {
+/*	for ( j = 0; j < LAT_SIZE; j++) {
 		for( i = 0;i<LONG_SIZE;i++){
 			//printf("%f ", cpu_nums[j*LONG_SIZE + i]);
 			if(i == LONG_SIZE -1) {
@@ -714,19 +876,75 @@ int main(int argc,char* argv[])
 		}
 //		printf("\n");
 	}
-
+*/
 
 
 	/* free the memory we allocated for the states and numbers */
-	cudaFree(states);
-	cudaFree(rand_norm_nums);
-	cudaFree(d_dirData);
-	cudaFree(d_u_dirAngle);
-	cudaFree(d_v_dirAngle);
+	HANDLE_ERROR(cudaFree(states));
+	HANDLE_ERROR(cudaFree(rand_norm_nums));
+	HANDLE_ERROR(cudaFree(d_dirData));
+	
+
+//--------------------------------------------------------------------------------------------------//	
+	int DeviceCount;
+	long DeviceMemory,MemoryRemaining,MemoryEachVar
+	int DaysPerTransfer;
+		
+	DeviceMemory =  Get_GPU_devices();
+	
+	cudaStream_t *streams = (cudaStream_t *) malloc((NUM_DATA_FILES + 1) * sizeof(cudaStream_t));
+
+ 	for (i = 0; i < NUM_DATA_FILES + 1; i++)
+    	{
+        	HANDLE_ERROR(cudaStreamCreate(&(streams[i])));
+    	}
+
+	/** Getting the total number of days and timesteps that can fit in one data transfer**/
+	/* MemoryRemaining is to be divided among the vars */
+	MemoryRemaining = DeviceMemory - 							//GPU Device 0, memory size in bytes
+			( NumOfBirds * 2 * TOTAL_DAYS * TIMESTEPS_PER_DAY * sizeof(float)  +	//Total size of the array that contains the bird positions
+			LAT_SIZE * LONG_SIZE * 2 * sizeof(float) );				//Total size of the two arrays dir_u and dir_v
+
+ 	printf("\n\n\t\t Total Memory remaining is: %ld \n",MemoryRemaining);
+
+	MemoryEachVar = MemoryRemaining/NUM_DATA_FILES;
+
+	printf("\t\t Memory for each variable is: %ld \n",MemoryEachVar);
+
+	DaysPerTransfer = MemoryEachVar/(24 * LAT_SIZE * LONG_SIZE * sizeof(float));
+
+	printf("\t\t Total Days per Transfer of data is: %ld \n",DaysPerTransfer); //45 days per var in our case
+
+//-----------------------------------------------Allocation of Device memory-------------------------//
+	float* d_udata,*d_vdata,*d_u10data,*d_v10data,*d_dirV,*d_dirU,*d_precip,*d_pressure;
+	int divisible,lastDataTransfer;
+
+	HANDLE_ERROR(cudaMalloc());
+	HANDLE_ERROR(cudaMalloc());
+	HANDLE_ERROR(cudaMalloc());
+	HANDLE_ERROR(cudaMalloc());
+	HANDLE_ERROR(cudaMalloc());
+	HANDLE_ERROR(cudaMalloc());
+
+	lastDataTransfer = TOTAL_DAYS / DaysPerTransfer;
+
+	divisible = TOTAL_DAYS % DaysPerTransfer;
+	
+	if(divisible != 0){
+			lastDataTransfer++;
+	}
+
+	for(i=0;i<lastDataTransfer;i++){
+		cudaMemcpyAsync(&);	
+	}
+
+
 //-----------------------------------------------Freeing allocated memory----------------------------//
 	
 
 
+	HANDLE_ERROR(cudaFree(d_u_dirAngle));
+	HANDLE_ERROR(cudaFree(d_v_dirAngle));
 
 	free(udata);
 	free(vdata);
@@ -739,6 +957,8 @@ int main(int argc,char* argv[])
 	free(precipData);
 	free(pressureData);
 	free(lwData);
+
+	free(streams);
 
 	fclose(dirTxt);
 
