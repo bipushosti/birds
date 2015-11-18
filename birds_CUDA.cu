@@ -19,7 +19,8 @@
 #include <math.h>
 #include <pthread.h>
 
-#define CUDA_API_PER_THREAD_DEFAULT_STREAM
+#include "birds_CUDA.h"
+//#define CUDA_API_PER_THREAD_DEFAULT_STREAM
 
 
 #include <cuda.h>
@@ -100,8 +101,9 @@
 //To make the birds head back directly west the angle must be set to 180.
 #define BIRD_SEA_ANGLE		180
 
-//Total number of data files or variables bird flight depends on
-#define NUM_DATA_FILES		8
+#define TOTAL_DATA_FILES	9
+//Total number of data files or variables bird flight depends on;Does not include direction files and land water data
+#define NUM_DATA_FILES		6
 
 #define HANDLE_ERROR( err ) (HandleError( err, __FILE__, __LINE__ ))
 //------------------------------Notes---------------------------------------------------------------------------------------
@@ -137,20 +139,18 @@ struct file_IO {
 //-------------------------------------------------------------------------------------------------------------------------------------
 //Global Variables
 
-float* dirData;
 float* udata;
 float* vdata;
+float* u10data;
+float* v10data;
+float* precipData;
+float* pressureData;
 
 float* dir_u;
 float* dir_v;
-
-float* u10data;
-float* v10data;
-
-float* precipData;
-float* pressureData;
 float* lwData;
 
+float* dirData;
 //###########################################################################################################################################//
 
 static void HandleError( cudaError_t err,const char *file, int line ) {
@@ -173,7 +173,7 @@ long Get_GPU_devices()
 	HANDLE_ERROR(cudaGetDeviceProperties(&prop,whichDevice));
 	
 	if(!prop.deviceOverlap){
-		printf("Device does not handle overlaps so streams are not possible\n");
+			printf("Device does not handle overlaps so streams are not possible\n");
 	return 0;
 	}
 
@@ -489,7 +489,7 @@ long convert_to_month(int month,int day)
 	else if(month == 10){
 		index = 62; //The data for october starts after 31+30 days of sept and august respectively.
 	}
-	else if(month == 10){
+	else if(month == 11){
 		index = 93; //The data for october starts after 31+30+31 days of sept,aug and oct respectively.
 	}
 	else{
@@ -649,7 +649,7 @@ int main(int argc,char* argv[])
 //-----------------------------------------------Month-----------------------------------------//
 /** Making sure month provided is between August and November inclusive **/
 
-	if((month <= 11) && (month >= 8)){
+	if((month < 12) && (month > 7)){
 		sprintf(monthStr,"%d",month);
 	}else{
 		printf("\t\t Invalid month provided; Use between 8 and 11 inclusive\n");
@@ -669,7 +669,6 @@ int main(int argc,char* argv[])
 /** Checking if correct year specified **/
 
 	if((year>= 2008) && (year<=2013)){
-	//if((strcmp(argv[1],"2008")==0)||(strcmp(argv[1],"2009")==0)||(strcmp(argv[1],"2010")==0)||(strcmp(argv[1],"2011")==0)||(strcmp(argv[1],"2012")==0)||(strcmp(argv[1],"2013")==0)){
 		//Add file location here
 		sprintf(yearStr,"%d",year);
 		strcpy(yearFileName,baseFileName);
@@ -778,12 +777,15 @@ int main(int argc,char* argv[])
 		perror("Cannot open file with direction data\n");
 		return -1;
 	}
+
+	
 //--------------------------Memory Allocation-----------------------------------//
 
 
 	dirData = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));	
 	dir_u = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
 	dir_v = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
+	lwData = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
 
 	udata = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
 	vdata = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
@@ -792,8 +794,20 @@ int main(int argc,char* argv[])
 
 	precipData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
 	pressureData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
-	lwData = (float*)malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
 
+/*	HANDLE_ERROR(cudaMallocHost((void**)&dirData,LAT_SIZE * LONG_SIZE * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&dir_u,LAT_SIZE * LONG_SIZE * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&dir_v,LAT_SIZE * LONG_SIZE * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&lwData,LAT_SIZE * LONG_SIZE * sizeof(float)));
+
+	HANDLE_ERROR(cudaMallocHost((void**)&udata,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&vdata,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&u10data,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&v10data,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+	
+	HANDLE_ERROR(cudaMallocHost((void**)&pressureData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&precipData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+*/
 //--------------------------Initializing the structures-------------------------------------------------------------------//
 	inpStruct[0].fp = vdataTxt;
 	inpStruct[0].inpVals = vdata;
@@ -820,7 +834,9 @@ int main(int argc,char* argv[])
 	inpStruct[7].inpVals = dirData;
 
 
+	/** Using pthreads to read from the files in parallel**/
 	pthread_t threads[8];
+
 	int i,j;
 	for(i=0;i<8;i++){
 		if(pthread_create(&threads[i],NULL,read_dataFiles,(void*)&inpStruct[i]) != 0){
@@ -837,6 +853,12 @@ int main(int argc,char* argv[])
 		}
 	}
 //-----------------------------------Getting Wrapped Normal Angles--------------------------------------------------------------
+	int DeviceCount;
+	/** Getting the total number of devices available **/
+	HANDLE_ERROR(cudaGetDeviceCount(&DeviceCount));
+	HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
+	HANDLE_ERROR(cudaDeviceReset());
+
 	curandState_t* states;
 	
 	cudaMalloc((void**)&states,LAT_SIZE*LONG_SIZE*sizeof(curandState_t));
@@ -884,58 +906,195 @@ int main(int argc,char* argv[])
 	HANDLE_ERROR(cudaFree(rand_norm_nums));
 	HANDLE_ERROR(cudaFree(d_dirData));
 	
-
 //--------------------------------------------------------------------------------------------------//	
-	int DeviceCount;
-	long DeviceMemory,MemoryRemaining,MemoryEachVar
-	int DaysPerTransfer;
-		
-	DeviceMemory =  Get_GPU_devices();
 	
-	cudaStream_t *streams = (cudaStream_t *) malloc((NUM_DATA_FILES + 1) * sizeof(cudaStream_t));
+	size_t MemoryEachVar,DataPerTransfer,SizePerTimestep;
+	int TimestepsPerTransfer;		
+	size_t MemoryRemaining,TotalMemory;
 
- 	for (i = 0; i < NUM_DATA_FILES + 1; i++)
-    	{
-        	HANDLE_ERROR(cudaStreamCreate(&(streams[i])));
-    	}
 
-	/** Getting the total number of days and timesteps that can fit in one data transfer**/
-	/* MemoryRemaining is to be divided among the vars */
-	MemoryRemaining = DeviceMemory - 							//GPU Device 0, memory size in bytes
-			( NumOfBirds * 2 * TOTAL_DAYS * TIMESTEPS_PER_DAY * sizeof(float)  +	//Total size of the array that contains the bird positions
-			LAT_SIZE * LONG_SIZE * 2 * sizeof(float) );				//Total size of the two arrays dir_u and dir_v
 
- 	printf("\n\n\t\t Total Memory remaining is: %ld \n",MemoryRemaining);
+
+	/** Getting the total remaining memory that the device can allocate **/
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	MemoryRemaining -= 100 * 1000000;
+
+	printf("Total mem: %zd,Free mem: %zd\n",TotalMemory,MemoryRemaining);
+
+ 	printf("\n\n\t\t Total Memory remaining is: %zd \n",MemoryRemaining);
 
 	MemoryEachVar = MemoryRemaining/NUM_DATA_FILES;
 
-	printf("\t\t Memory for each variable is: %ld \n",MemoryEachVar);
+	printf("\t\t Memory for each variable is: %zd \n",MemoryEachVar);
 
-	DaysPerTransfer = MemoryEachVar/(24 * LAT_SIZE * LONG_SIZE * sizeof(float));
+	/** Need to send data per timestep so has to be a multiple of LAT_SIZE *LONG_SIZE* sizeof(float)**/
+	SizePerTimestep = LAT_SIZE * LONG_SIZE * sizeof(float);
+	DataPerTransfer = (MemoryEachVar/SizePerTimestep) * SizePerTimestep;
+	TimestepsPerTransfer = DataPerTransfer/SizePerTimestep;
 
-	printf("\t\t Total Days per Transfer of data is: %ld \n",DaysPerTransfer); //45 days per var in our case
-
-//-----------------------------------------------Allocation of Device memory-------------------------//
-	float* d_udata,*d_vdata,*d_u10data,*d_v10data,*d_dirV,*d_dirU,*d_precip,*d_pressure;
+	printf("\t\tChecking Division: %zd\n",MemoryEachVar/SizePerTimestep);		
+	printf("\t\t Total Timesteps per Transfer of data is: %ld \n",TimestepsPerTransfer); 
+	printf("\t\tData per transfer is %zd\n",DataPerTransfer);	
+	
+//-----------------------------------------------Allocating memory for  Streams_struct structure----------//
 	int divisible,lastDataTransfer;
+	long int DataLastTransfer;//Per variable
 
-	HANDLE_ERROR(cudaMalloc());
-	HANDLE_ERROR(cudaMalloc());
-	HANDLE_ERROR(cudaMalloc());
-	HANDLE_ERROR(cudaMalloc());
-	HANDLE_ERROR(cudaMalloc());
-	HANDLE_ERROR(cudaMalloc());
+	lastDataTransfer = (TOTAL_DAYS * TIMESTEPS_PER_DAY) / TimestepsPerTransfer;
 
-	lastDataTransfer = TOTAL_DAYS / DaysPerTransfer;
-
-	divisible = TOTAL_DAYS % DaysPerTransfer;
+	divisible = (TOTAL_DAYS*TIMESTEPS_PER_DAY) % TimestepsPerTransfer;
 	
 	if(divisible != 0){
 			lastDataTransfer++;
 	}
+	
+	printf("Total Transfers required: %ld\n",lastDataTransfer);
+	/** Tota bytes transfered per data transfer**/
 
+	Stream_struct Stream_values[lastDataTransfer];
+	DataLastTransfer = TOTAL_DAYS * TIMESTEPS_PER_DAY * LAT_SIZE * LONG_SIZE * sizeof(float) - DataPerTransfer * (lastDataTransfer-1); 
+
+
+	for(i=0;i<lastDataTransfer-1;i++){
+
+		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+		printf("Total mem: %zd,Free mem(Before any allocation): %zd\n",TotalMemory,MemoryRemaining);
+
+		//HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
+		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+		printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
+
+		HANDLE_ERROR(cudaStreamCreate(&Stream_values[i].stream));
+		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+		printf("Total mem: %zd,Free mem(After Stream Create): %zd\n",TotalMemory,MemoryRemaining);
+
+		HANDLE_ERROR(cudaMalloc((void**)&Stream_values[i].d_udata,DataPerTransfer));	
+		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+		printf("Total mem: %zd,Free mem(After udata allocation): %zd\n",TotalMemory,MemoryRemaining);
+	
+		HANDLE_ERROR(cudaMalloc((void**)&Stream_values[i].d_vdata,DataPerTransfer));	
+		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+		printf("Total mem: %zd,Free mem(After vdata allocation): %zd\n",TotalMemory,MemoryRemaining);
+
+		HANDLE_ERROR(cudaMalloc((void**)&Stream_values[i].d_u10data,DataPerTransfer));	
+		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+		printf("Total mem: %zd,Free mem(After u10data allocation): %zd\n",TotalMemory,MemoryRemaining);
+
+		HANDLE_ERROR(cudaMalloc((void**)&Stream_values[i].d_v10data,DataPerTransfer));	
+		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+		printf("Total mem: %zd,Free mem(After v10data allocation): %zd\n",TotalMemory,MemoryRemaining);
+
+		HANDLE_ERROR(cudaMalloc((void**)&Stream_values[i].d_precipData,DataPerTransfer));	
+		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+		printf("Total mem: %zd,Free mem(After precipData allocation): %zd\n",TotalMemory,MemoryRemaining);
+
+		
+//----------> Cannot allocate pressureData
+		HANDLE_ERROR(cudaMalloc((void**)&Stream_values[i].d_pressureData,DataPerTransfer));	
+		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+		printf("Total mem: %zd,Free mem(After pressureData allocation): %zd\n",TotalMemory,MemoryRemaining);
+
+		HANDLE_ERROR(cudaDeviceSynchronize());
+
+		HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[i].h_udata,DataPerTransfer));	
+		HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[i].h_vdata,DataPerTransfer));	
+		HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[i].h_u10data,DataPerTransfer));	
+		HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[i].h_v10data,DataPerTransfer));	
+		HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[i].h_precipData,DataPerTransfer));	
+		HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[i].h_pressureData,DataPerTransfer));	
+
+		printf("After all the host allocations %d\n",i);
+
+
+		HANDLE_ERROR(cudaStreamDestroy(Stream_values[i].stream));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_udata));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_vdata));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_u10data));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_v10data));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_precipData));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_pressureData));
+		
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_udata));
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_vdata));
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_u10data));
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_v10data));
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_precipData));
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_pressureData));
+
+		printf("After all freeing %d\n",i);
+		
+	}
+
+	printf("After allocation of all except last\n");
+
+	HANDLE_ERROR(cudaStreamCreate(&Stream_values[lastDataTransfer - 1].stream));
+	printf("After allocation of stream in last struct\n");
+
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
+
+	HANDLE_ERROR(cudaMalloc((void**)&Stream_values[lastDataTransfer - 1].d_udata,DataLastTransfer));
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
+	
+	HANDLE_ERROR(cudaMalloc((void**)&Stream_values[lastDataTransfer - 1].d_vdata,DataLastTransfer));	
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
+
+	HANDLE_ERROR(cudaMalloc((void**)&Stream_values[lastDataTransfer - 1].d_u10data,DataLastTransfer));
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
+	
+	HANDLE_ERROR(cudaMalloc((void**)&Stream_values[lastDataTransfer - 1].d_v10data,DataLastTransfer));	
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
+
+	HANDLE_ERROR(cudaMalloc((void**)&Stream_values[lastDataTransfer - 1].d_precipData,DataLastTransfer));	
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
+
+	HANDLE_ERROR(cudaMalloc((void**)&Stream_values[lastDataTransfer - 1].d_pressureData,DataPerTransfer));	
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
+
+	HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[lastDataTransfer - 1].h_udata,DataLastTransfer));	
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After MallocHost): %zd\n",TotalMemory,MemoryRemaining);
+
+	HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[lastDataTransfer - 1].h_vdata,DataLastTransfer));	
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After MallocHost): %zd\n",TotalMemory,MemoryRemaining);
+
+	HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[lastDataTransfer - 1].h_u10data,DataLastTransfer));	
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After MallocHost): %zd\n",TotalMemory,MemoryRemaining);
+
+	HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[lastDataTransfer - 1].h_v10data,DataLastTransfer));	
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After MallocHost): %zd\n",TotalMemory,MemoryRemaining);
+	
+	HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[lastDataTransfer - 1].h_precipData,DataLastTransfer));	
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After MallocHost): %zd\n",TotalMemory,MemoryRemaining);
+	
+	HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[lastDataTransfer - 1].h_pressureData,DataLastTransfer));	
+	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+	printf("Total mem: %zd,Free mem(After MallocHost): %zd\n",TotalMemory,MemoryRemaining);
+
+
+
+//-----------------------------------------------Initializing Stream_values struct-------------------//
+	int ptrOffset;
+	ptrOffset = 0;	
 	for(i=0;i<lastDataTransfer;i++){
-		cudaMemcpyAsync(&);	
+		Stream_values[i].h_udata = udata + ptrOffset;	
+		Stream_values[i].h_udata = vdata + ptrOffset;
+		Stream_values[i].h_udata = u10data + ptrOffset;
+		Stream_values[i].h_udata = v10data + ptrOffset;
+		Stream_values[i].h_udata = precipData + ptrOffset;
+		Stream_values[i].h_udata = pressureData + ptrOffset;
+		
+		ptrOffset+= DataPerTransfer/sizeof(float); 
 	}
 
 
@@ -958,10 +1117,38 @@ int main(int argc,char* argv[])
 	free(pressureData);
 	free(lwData);
 
-	free(streams);
+	printf("Before freeing everything\n");
+/*	for(i=0;i<lastDataTransfer;i++){
+		HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
 
+		HANDLE_ERROR(cudaStreamDestroy(Stream_values[i].stream));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_udata));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_vdata));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_u10data));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_v10data));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_precipData));
+		HANDLE_ERROR(cudaFree(Stream_values[i].d_pressureData));
+		
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_udata));
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_vdata));
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_u10data));
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_v10data));
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_precipData));
+		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_pressureData));
+
+	}
+
+*/
 	fclose(dirTxt);
-
+	fclose(posdataTxt);	
+	fclose(udataTxt);
+	fclose(vdataTxt);
+	fclose(v10dataTxt);
+	fclose(u10dataTxt);
+	fclose(precipTxt);
+	fclose(pressureTxt);
+	fclose(lwTxt);
+	
 	printf("End\n");
 	return 0;
 }
