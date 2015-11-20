@@ -124,9 +124,10 @@ __device__ float bilinear_interpolation_LargeData(float x,float y,float* data_ar
 
 __device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v);
 __device__ long bird_AtSea(float pos_row,float pos_col,long l,float* udata,float* vdata,float* dir_u,float* dir_v,float* lwData);
-__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData);
-
-void read_dataFiles(FILE* textFile,float* dataArray);
+__global__ void bird_movement(float* position,int numBirds,float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData);
+//__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData);
+static void* write_dataVars(void* arguments);
+static void* read_dataFiles(void* arguments);
 long convert_to_month(int month,int day);
 
 static void HandleError( cudaError_t err,const char *file, int line );
@@ -135,6 +136,8 @@ long Get_GPU_devices();
 struct file_IO {
 	FILE *fp;
 	float* inpVals;
+	float* streamArray;
+	size_t dataSize;
 }inpStruct[8]; 
 //-------------------------------------------------------------------------------------------------------------------------------------
 //Global Variables
@@ -253,7 +256,7 @@ __global__ void generate_kernel(curandState *states,float* numbers,float* angles
 
 //###########################################################################################################################################//
 
-__device__ long bird_AtSea(float pos_row,float pos_col,long l,float* udata,float* vdata,float* lwData)
+__device__ long bird_AtSea(float* position,float pos_row,float pos_col,long l,float* udata,float* vdata,float* lwData)
 {
 	long count_timeSteps = l;
 	float u_val,v_val,u_dir,v_dir;
@@ -274,6 +277,9 @@ __device__ long bird_AtSea(float pos_row,float pos_col,long l,float* udata,float
 		will not fly west **/
 		pos_row = pos_row + (v_val + v_dir) * 0.36 * -1;	
 		pos_col = pos_col + (u_val + u_dir) * 0.36;
+
+		//position[(l-l_start)* PosRowLen + (id *2)] = pos_row ;
+		//position[(l-l_start)* PosRowLen + (id *2) + 1] = pos_col ;
 
 		index = lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))];
 
@@ -476,7 +482,27 @@ static void* read_dataFiles(void* arguments)
 }
 
 //###########################################################################################################################################//
+static void* write_dataVars(void* arguments)
+{
 
+	struct file_IO *inputArgs;
+	inputArgs = (struct file_IO *)arguments;
+
+	float* dataArray,*destArray;
+	size_t totalSize;	
+	long int i;
+
+	dataArray = inputArgs->inpVals;
+	destArray = inputArgs->streamArray;
+	totalSize = inputArgs->dataSize;
+
+	for(i=0;i<totalSize;i++){
+		destArray[i] = *(dataArray + i);
+	}
+
+	return NULL;
+}
+//###########################################################################################################################################//
 long convert_to_month(int month,int day)
 {
 	long index,offset;
@@ -504,22 +530,34 @@ long convert_to_month(int month,int day)
 
 //###########################################################################################################################################//
 
-__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData)
+//__global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData)
+
+
+__global__ void bird_movement(float* position,int NumBirds,float pos_row,float pos_col,long l,float* udata,float* vdata,float* u10data,float* v10data,float* dirData,float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData)
 {
+
+
+
 	//Thread indices
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
-
 	int id = y * LONG_SIZE + x;
 
-	long l_old;	
 
+
+
+	long l_old,l_start;	
 	float profit_value,actualAngle;
 	float last_pressure,pressure_sum,pressure_MultSum,slope;
 	float u_ten,v_ten,u_val,v_val,uDir_value,vDir_value; //precip_val;
 	int k;
 
+	int PosRowLen = NumBirds * 2;
+
+	
 	slope = 0;
+	l_start = l;
+
 
 	while(l < (TOTAL_DAYS * TIMESTEPS_PER_DAY - 24)){
 	
@@ -541,6 +579,10 @@ __global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,fl
 
 				pos_row = pos_row + (v_val + vDir_value ) * 0.36 * -1;
 				pos_col = pos_col + (u_val + uDir_value) * 0.36;
+			
+				position[(l-l_start)* PosRowLen + (id *2)] = pos_row ;
+				position[(l-l_start)* PosRowLen + (id *2) + 1] = pos_col ;
+
 			}	
 
 
@@ -557,12 +599,15 @@ __global__ void bird_movement(float pos_row,float pos_col,long l,float* udata,fl
 
 					pos_row = pos_row + (v_val + vDir_value ) * 0.36 * -1;
 					pos_col = pos_col + (u_val + uDir_value) * 0.36;
+
+					position[(l-l_start)* PosRowLen + (id *2)] = pos_row ;
+					position[(l-l_start)* PosRowLen + (id *2) + 1] = pos_col ;
 				}
 			}
 
 			/** If at sea even after the 4 hours **/
 			if(lwData[__float2int_rd(pos_row * LAT_SIZE + pos_col)] != 1){
-				l = bird_AtSea(pos_row,pos_col,l,udata,vdata,lwData);
+				l = bird_AtSea(position,pos_row,pos_col,l,udata,vdata,lwData);
 			}		
 		}
 		else{
@@ -795,19 +840,6 @@ int main(int argc,char* argv[])
 	precipData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
 	pressureData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
 
-/*	HANDLE_ERROR(cudaMallocHost((void**)&dirData,LAT_SIZE * LONG_SIZE * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&dir_u,LAT_SIZE * LONG_SIZE * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&dir_v,LAT_SIZE * LONG_SIZE * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&lwData,LAT_SIZE * LONG_SIZE * sizeof(float)));
-
-	HANDLE_ERROR(cudaMallocHost((void**)&udata,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&vdata,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&u10data,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&v10data,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-	
-	HANDLE_ERROR(cudaMallocHost((void**)&pressureData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&precipData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-*/
 //--------------------------Initializing the structures-------------------------------------------------------------------//
 	inpStruct[0].fp = vdataTxt;
 	inpStruct[0].inpVals = vdata;
@@ -912,13 +944,14 @@ int main(int argc,char* argv[])
 	int TimestepsPerTransfer;		
 	size_t MemoryRemaining,TotalMemory;
 
-
-
-
 	/** Getting the total remaining memory that the device can allocate **/
 	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
+
+	MemoryRemaining -= 2*NumOfBirds* (122 * 24 - offset_into_data);	
+	//Need to make sure 100MB is free!! For some reason
 	MemoryRemaining -= 100 * 1000000;
 
+	
 	printf("Total mem: %zd,Free mem: %zd\n",TotalMemory,MemoryRemaining);
 
  	printf("\n\n\t\t Total Memory remaining is: %zd \n",MemoryRemaining);
@@ -929,7 +962,10 @@ int main(int argc,char* argv[])
 
 	/** Need to send data per timestep so has to be a multiple of LAT_SIZE *LONG_SIZE* sizeof(float)**/
 	SizePerTimestep = LAT_SIZE * LONG_SIZE * sizeof(float);
+
+	/** To get a number divisible by SizePerTimestep**/
 	DataPerTransfer = (MemoryEachVar/SizePerTimestep) * SizePerTimestep;
+
 	TimestepsPerTransfer = DataPerTransfer/SizePerTimestep;
 
 	printf("\t\tChecking Division: %zd\n",MemoryEachVar/SizePerTimestep);		
@@ -952,8 +988,13 @@ int main(int argc,char* argv[])
 	/** Tota bytes transfered per data transfer**/
 
 	Stream_struct Stream_values[lastDataTransfer];
+
 	DataLastTransfer = TOTAL_DAYS * TIMESTEPS_PER_DAY * LAT_SIZE * LONG_SIZE * sizeof(float) - DataPerTransfer * (lastDataTransfer-1); 
 
+	size_t ptrOffset;
+	ptrOffset = 0;	
+
+	
 
 	for(i=0;i<lastDataTransfer-1;i++){
 
@@ -988,8 +1029,6 @@ int main(int argc,char* argv[])
 		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
 		printf("Total mem: %zd,Free mem(After precipData allocation): %zd\n",TotalMemory,MemoryRemaining);
 
-		
-//----------> Cannot allocate pressureData
 		HANDLE_ERROR(cudaMalloc((void**)&Stream_values[i].d_pressureData,DataPerTransfer));	
 		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
 		printf("Total mem: %zd,Free mem(After pressureData allocation): %zd\n",TotalMemory,MemoryRemaining);
@@ -1005,6 +1044,54 @@ int main(int argc,char* argv[])
 
 		printf("After all the host allocations %d\n",i);
 
+//-----------------------------------------Initializing the structures----------------------------------------//		
+		
+		inpStruct[0].inpVals = vdata + ptrOffset;
+		inpStruct[0].dataSize = DataPerTransfer/sizeof(float);
+		inpStruct[0].streamArray = Stream_values[i].h_vdata;
+		
+		inpStruct[1].inpVals = udata + ptrOffset;
+		inpStruct[1].dataSize = DataPerTransfer/sizeof(float);
+		inpStruct[1].streamArray = Stream_values[i].h_udata;
+		
+		inpStruct[2].inpVals = v10data + ptrOffset;
+		inpStruct[2].dataSize = DataPerTransfer/sizeof(float);
+		inpStruct[2].streamArray = Stream_values[i].h_v10data;
+	
+		inpStruct[3].inpVals = u10data + ptrOffset;
+		inpStruct[3].dataSize = DataPerTransfer/sizeof(float);
+		inpStruct[3].streamArray = Stream_values[i].h_u10data;
+	
+		inpStruct[4].inpVals = precipData + ptrOffset;
+		inpStruct[4].dataSize = DataPerTransfer/sizeof(float);
+		inpStruct[4].streamArray = Stream_values[i].h_precipData;
+	
+		inpStruct[5].inpVals = pressureData + ptrOffset;
+		inpStruct[5].dataSize = DataPerTransfer/sizeof(float);
+		inpStruct[5].streamArray = Stream_values[i].h_pressureData;
+
+		printf("Before pthreads start %d\n",i);
+		
+		pthread_t write_threads[NUM_DATA_FILES];
+
+		for(j=0;j<NUM_DATA_FILES;j++){
+			if(pthread_create(&write_threads[j],NULL,write_dataVars,(void*)&inpStruct[j]) != 0){
+				fprintf(stderr,"ERROR: Thread creation using pthreads failed\n");
+				return -1;
+			}
+
+		}
+
+		printf("Before pthreads join %d\n", i);
+
+		for(j=0;j<NUM_DATA_FILES;j++){
+			if(pthread_join(write_threads[j],NULL)!=0){
+ 				fprintf(stderr,"ERROR: Thread join failed\n");
+                        	return -1;
+			}
+		}
+
+//---------------------------------Freeing allocated memory in GPU and pinned memory in CPU-------------------//
 
 		HANDLE_ERROR(cudaStreamDestroy(Stream_values[i].stream));
 		HANDLE_ERROR(cudaFree(Stream_values[i].d_udata));
@@ -1021,9 +1108,14 @@ int main(int argc,char* argv[])
 		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_precipData));
 		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_pressureData));
 
+		ptrOffset+= DataPerTransfer/sizeof(float); 
 		printf("After all freeing %d\n",i);
 		
 	}
+
+
+//----------------------------------------------------Last Iteration-----------------------------------------//
+	/** Last iteration where the size might not be the same as others **/
 
 	printf("After allocation of all except last\n");
 
@@ -1053,9 +1145,11 @@ int main(int argc,char* argv[])
 	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
 	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
 
-	HANDLE_ERROR(cudaMalloc((void**)&Stream_values[lastDataTransfer - 1].d_pressureData,DataPerTransfer));	
+	HANDLE_ERROR(cudaMalloc((void**)&Stream_values[lastDataTransfer - 1].d_pressureData,DataLastTransfer));	
 	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
 	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
+
+	HANDLE_ERROR(cudaDeviceSynchronize());
 
 	HANDLE_ERROR(cudaMallocHost((void**)&Stream_values[lastDataTransfer - 1].h_udata,DataLastTransfer));	
 	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
@@ -1082,24 +1176,67 @@ int main(int argc,char* argv[])
 	printf("Total mem: %zd,Free mem(After MallocHost): %zd\n",TotalMemory,MemoryRemaining);
 
 
+	inpStruct[0].inpVals = vdata + ptrOffset;
+	inpStruct[0].dataSize = DataLastTransfer/sizeof(float);
+	inpStruct[0].streamArray = Stream_values[lastDataTransfer - 1].h_vdata;
+	
+	inpStruct[1].inpVals = udata + ptrOffset;
+	inpStruct[1].dataSize = DataLastTransfer/sizeof(float);
+	inpStruct[1].streamArray = Stream_values[lastDataTransfer - 1].h_udata;
+	
+	inpStruct[2].inpVals = v10data + ptrOffset;
+	inpStruct[2].dataSize = DataLastTransfer/sizeof(float);
+	inpStruct[2].streamArray = Stream_values[lastDataTransfer - 1].h_v10data;
+
+	inpStruct[3].inpVals = u10data + ptrOffset;
+	inpStruct[3].dataSize = DataLastTransfer/sizeof(float);
+	inpStruct[3].streamArray = Stream_values[lastDataTransfer - 1].h_u10data;
+
+	inpStruct[4].inpVals = precipData + ptrOffset;
+	inpStruct[4].dataSize = DataLastTransfer/sizeof(float);
+	inpStruct[4].streamArray = Stream_values[lastDataTransfer - 1].h_precipData;
+
+	inpStruct[5].inpVals = pressureData + ptrOffset;
+	inpStruct[5].dataSize = DataLastTransfer/sizeof(float);
+	inpStruct[5].streamArray = Stream_values[lastDataTransfer - 1].h_pressureData;
 
 //-----------------------------------------------Initializing Stream_values struct-------------------//
-	int ptrOffset;
-	ptrOffset = 0;	
-	for(i=0;i<lastDataTransfer;i++){
-		Stream_values[i].h_udata = udata + ptrOffset;	
-		Stream_values[i].h_udata = vdata + ptrOffset;
-		Stream_values[i].h_udata = u10data + ptrOffset;
-		Stream_values[i].h_udata = v10data + ptrOffset;
-		Stream_values[i].h_udata = precipData + ptrOffset;
-		Stream_values[i].h_udata = pressureData + ptrOffset;
-		
-		ptrOffset+= DataPerTransfer/sizeof(float); 
+	pthread_t write_threadsLast[NUM_DATA_FILES];
+
+	for(j=0;j<NUM_DATA_FILES;j++){
+		if(pthread_create(&write_threadsLast[j],NULL,write_dataVars,(void*)&inpStruct[j]) != 0){
+			fprintf(stderr,"ERROR: Thread creation using pthreads failed\n");
+			return -1;
+		}
+
+	}
+
+	printf("Before pthreads join in last");
+
+	for(j=0;j<NUM_DATA_FILES;j++){
+		if(pthread_join(write_threadsLast[j],NULL)!=0){
+			fprintf(stderr,"ERROR: Thread join failed\n");
+                	return -1;
+		}
 	}
 
 
+
 //-----------------------------------------------Freeing allocated memory----------------------------//
+	HANDLE_ERROR(cudaStreamDestroy(Stream_values[lastDataTransfer - 1].stream));
+	HANDLE_ERROR(cudaFree(Stream_values[lastDataTransfer - 1].d_udata));
+	HANDLE_ERROR(cudaFree(Stream_values[lastDataTransfer - 1].d_vdata));
+	HANDLE_ERROR(cudaFree(Stream_values[lastDataTransfer - 1].d_u10data));
+	HANDLE_ERROR(cudaFree(Stream_values[lastDataTransfer - 1].d_v10data));
+	HANDLE_ERROR(cudaFree(Stream_values[lastDataTransfer - 1].d_precipData));
+	HANDLE_ERROR(cudaFree(Stream_values[lastDataTransfer - 1].d_pressureData));
 	
+	HANDLE_ERROR(cudaFreeHost(Stream_values[lastDataTransfer - 1].h_udata));
+	HANDLE_ERROR(cudaFreeHost(Stream_values[lastDataTransfer - 1].h_vdata));
+	HANDLE_ERROR(cudaFreeHost(Stream_values[lastDataTransfer - 1].h_u10data));
+	HANDLE_ERROR(cudaFreeHost(Stream_values[lastDataTransfer - 1].h_v10data));
+	HANDLE_ERROR(cudaFreeHost(Stream_values[lastDataTransfer - 1].h_precipData));
+	HANDLE_ERROR(cudaFreeHost(Stream_values[lastDataTransfer - 1].h_pressureData));
 
 
 	HANDLE_ERROR(cudaFree(d_u_dirAngle));
@@ -1116,29 +1253,9 @@ int main(int argc,char* argv[])
 	free(precipData);
 	free(pressureData);
 	free(lwData);
+	printf("After freeing everything\n");
 
-	printf("Before freeing everything\n");
-/*	for(i=0;i<lastDataTransfer;i++){
-		HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
 
-		HANDLE_ERROR(cudaStreamDestroy(Stream_values[i].stream));
-		HANDLE_ERROR(cudaFree(Stream_values[i].d_udata));
-		HANDLE_ERROR(cudaFree(Stream_values[i].d_vdata));
-		HANDLE_ERROR(cudaFree(Stream_values[i].d_u10data));
-		HANDLE_ERROR(cudaFree(Stream_values[i].d_v10data));
-		HANDLE_ERROR(cudaFree(Stream_values[i].d_precipData));
-		HANDLE_ERROR(cudaFree(Stream_values[i].d_pressureData));
-		
-		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_udata));
-		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_vdata));
-		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_u10data));
-		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_v10data));
-		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_precipData));
-		HANDLE_ERROR(cudaFreeHost(Stream_values[i].h_pressureData));
-
-	}
-
-*/
 	fclose(dirTxt);
 	fclose(posdataTxt);	
 	fclose(udataTxt);
