@@ -92,7 +92,8 @@
 //To make the birds head back directly west the angle must be set to 270.
 #define BIRD_SEA_ANGLE		270
 
-#define BIRD_HRS_LIMIT		24
+//The maximum number of hours that the birds can fly continiously
+#define BIRD_HRS_LIMIT		72
 //------------------------------Notes---------------------------------------------------------------------------------------
 /*
 Altitude = 850 millibars
@@ -172,7 +173,8 @@ float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* 
 
 		int count_timesteps = 0;
 
-		for(count_timesteps = 0;count_timesteps<14;count_timesteps++,l++){
+		//for(count_timesteps = 0;count_timesteps<14;count_timesteps++,l++){
+		for(count_timesteps = 0;count_timesteps<(BIRD_HRS_LIMIT - 10);count_timesteps++,l++){
 
 			//Bilinear interpolation for u and v data
 			u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
@@ -207,32 +209,68 @@ float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* 
 			//l++;
 			//count_timesteps++;
 
-			//fprintf(posFile,"%s\t %f \t %f \t %f \t %f \t %f \t %f \t At %s!! \n",start_date,STARTING_ROW,STARTING_COL,pos_row,pos_col,u_val,v_val,location);
-
 			distance = sqrt((pos_row - prev_row)*(pos_row - prev_row) + (pos_col - prev_col)*(pos_col - prev_col));
 
-//			fprintf(posFile,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s %s\tAt %s\n",start_date,starting_row,starting_col,pos_row,pos_col,u_val,v_val,dirAngle,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,date[0],date[1],year,location);
-				
-			fprintf(posFile,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tFlying at sea (After 10 hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
 
-			if(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))] == 1){
-				//loop_check = 1;
+			if(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))] == 0){
+
+				//This function is for flight after the first 10 hours
+				fprintf(posFile,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tFlying at sea (After 10 hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
+
+			}//If the bird finds water 
+			else if(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))] == 1){
+
 				long bckp_l;
+				int tmp_val,zero_chk;
 				bckp_l = l;
+				tmp_val = 0;
+				zero_chk = 1;
+				
+				printf("COUNTTIMESTEPS + 10 is %d\n",count_timesteps + 10);
+				//if(((count_timesteps + 10) % 24) != 0){
+				if((count_timesteps + 10) > 23 ){
+					printf("(COUNTTIMESTEPS + 10)  is %d\n",(count_timesteps + 10));
+					tmp_val = 1;
+					
+				}else{
+					tmp_val = 0;
+				}
+				
+				if(count_timesteps == 0){
+					zero_chk = 0;
+				}
+				
 
+				l--;
+				bckp_l = l;
+				printf("INSIDE THE OVER 10 HRS FLIGHT; l IS %ld\n",l);
 				//This takes it back to the starting time of the previous day
 				l = l - (6 + 4 + count_timesteps);
-				//And this takes it to the starting time of the next day
-				l += (STOPOVER_DAYS+1) * 24;
+				
 
+				//And this takes it to the starting time of the next day; The day when the bird is supposed to fly
+				//Will also consider if any stopover days are specified
+	//			l += ((STOPOVER_DAYS + 1) * 24;
+
+				//And this takes it to the starting time of the next day; The day when the bird is supposed to fly
+				//Will also consider if any stopover days are specified
+	
+				if(l>24){
+					//No Change
+					l+=(count_timesteps/24 + 1)*24 + STOPOVER_DAYS * 24;
+				}else{
+					l += (STOPOVER_DAYS + 1) * 24;
+				}
+				//l+= zero_chk * ((count_timesteps+10)/24 + tmp_val) * 24);
+				printf("INSIDE THE OVER 10 HRS FLIGHT*******NEW l IS %ld\n",l);
 
 				int i;
 				for(i=0;i<(l-bckp_l);i++){
-					u_val = bilinear_interpolation(pos_col,pos_row,udata,bckp_l + i,1);	
-					v_val = bilinear_interpolation(pos_col,pos_row,vdata,bckp_l + i,1);
+					u_val = bilinear_interpolation(pos_col,pos_row,udata,bckp_l + 1,1);	
+					v_val = bilinear_interpolation(pos_col,pos_row,vdata,bckp_l + 1,1);
+					date =  date_from_days(date,bckp_l+i);
 
-
-					fprintf(posFile,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tBird Landed in Land from Sea(After Flying over 10 hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
+					fprintf(posFile,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tBird Landed in Land from Sea(After Flying over 10 hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,bckp_l+i,year,date[1],date[0],(bckp_l + i - start_l +6)/TIMESTEPS_PER_DAY + 1,bckp_l + i -start_l);
 
 				}
 
@@ -248,13 +286,14 @@ float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* 
 			
 		}
 
+
 		//Birds can actually fly upto 3 days to get to land; This needs to change
 		//As of now, if the birds can not find their way back by next sunrise or +14 hrs
 		//they die. +14 because +4 hours added after 6hour flight if they find themselves at sea.
 		if(count_timesteps >= (BIRD_HRS_LIMIT-10)){ 
 			//loop_check = 1;
 			printf("Dead Bird!; For now the birds can not keep flying for more than a day or they die! \n");
-			fprintf(posFile,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tDead Bird (Flying for over 18 hours\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
+			fprintf(posFile,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tDead Bird (Flying for over BIRD_HRS_LIMIT (%d) hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l,BIRD_HRS_LIMIT);
 			exit(0) ;
 		}
 
@@ -976,6 +1015,7 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 				
 				if(pos_row >=  MAX_LAT_SOUTH){
 					printf("\t\tBird reached or passed the southern most lattitude\n");
+					fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tBird reached southern most lattitude\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
 					return;
 				}
 			}
@@ -1017,46 +1057,66 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 
 					fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s %s\t%ld\t%ld\tFlying at sea (After 6 hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,dirAngle,precip_val,last_pressure,slope,MIN_PROFIT,windProfit,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
 				}
+
+
+
+				if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))] == 0){
+					printf("BIRD IN WATER AFTER 10 HOURS OF FLIGHT; l IS %ld\n",l);
+					ret_values = check_bird_location(outTxt,lwData,udata,vdata,dirData,precipData,pos_row,pos_col,0,l,start_date,starting_row,starting_col,year,start_l);
+					in_water = 1;
+				}
+				else if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))] == 1){
+					in_water = 0;
+					
+					long uu;
+					long tmp_l;
+					//fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tLand After 10 hours\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l - start_l);
+					//l = (l-k) + ((STOPOVER_DAYS+1) * 24);
+
+					l--;
+					tmp_l = l;
+					
+					//l = (l + 14) + ((STOPOVER_DAYS+1) * 24);
+					l = (l + 14) + ((STOPOVER_DAYS) * 24);
+			
+	
+					for(uu = tmp_l;uu<l;uu++,tmp_l++){
+						u_val = bilinear_interpolation(pos_col,pos_row,udata,tmp_l,1);	
+						v_val = bilinear_interpolation(pos_col,pos_row,vdata,tmp_l,1);
+						precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
+						date =  date_from_days(date,tmp_l);
+
+
+						fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tLand After 10 hours\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,tmp_l,year,date[1],date[0],(tmp_l - start_l +6)/TIMESTEPS_PER_DAY + 1,tmp_l - start_l);
+					}
+	
+
+				
+				}
+				else if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==2){	
+					ret_values = check_bird_location(outTxt,lwData,udata,vdata,dirData,precipData,pos_row,pos_col,2,l,start_date,starting_row,starting_col,year,start_l);
+							in_water = 1;
+				}
+
 			}else{
 				int ii;
-				long tmp_l;
-				tmp_l = l;
+				//long tmp_l;
+				//tmp_l = l;
 				for(ii = 0;ii<18;ii++){
 					u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
 					v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
 					precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
 					date =  date_from_days(date,l);
 
-					fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tLand After 6 hours\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,tmp_l - start_l);
-					tmp_l ++;
+					fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tLand After 6 hours\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l - start_l);
+					//tmp_l ++;
+					l++;
 				}
-
-			}
-
-			if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==0){
-				ret_values = check_bird_location(outTxt,lwData,udata,vdata,dirData,precipData,pos_row,pos_col,0,l,start_date,starting_row,starting_col,year,start_l);
-				in_water = 1;
-			}
-			else if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==1){
 				in_water = 0;
-				l = (l-k) + ((STOPOVER_DAYS+1) * 24);
-				int uu;
-/*
-				for(uu = 0;uu<14;uu++){
-					u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
-					v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
-					precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
 
-					fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s %s\tLand After 10 hours\n",start_date,starting_row,starting_col,pos_row,pos_col,u_val,v_val,dirAngle,precip_val,last_pressure,slope,windProfit,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,date[0],date[1],year);
-				}
-*/
+			}
 
-				
-			}
-			else if(lwData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==2){	
-				ret_values = check_bird_location(outTxt,lwData,udata,vdata,dirData,precipData,pos_row,pos_col,2,l,start_date,starting_row,starting_col,year,start_l);
-				in_water = 1;
-			}
+		
 			
 
 
