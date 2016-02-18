@@ -112,12 +112,12 @@ __device__ float bilinear_interpolation_LargeData(float x,float y,float* data_ar
 
 __device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v);
 __device__ long bird_AtSea(int id,int arrLength,float* rowArray,float* colArray,long l_start,long l,float* udata,float* vdata,float* lwData);
-__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long start_l,long l,long maxtimesteps,float* udata,float* vdata,float* u10data,
+__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int l,long int maxtimesteps,float* udata,float* vdata,float* u10data,
 				float* v10data,float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData);
 
 static void* write_dataVars(void* arguments);
 static void* read_dataFiles(void* arguments);
-long convert_to_month(int month,int day);
+long int convert_to_month(int month,int day);
 
 static void HandleError( cudaError_t err,const char *file, int line );
 long Get_GPU_devices();
@@ -246,7 +246,7 @@ __global__ void generate_kernel(curandState *states,float* numbers,float* angles
 
 //###########################################################################################################################################//
 
-__device__ long bird_AtSea(int id,int arrLength,float* rowArray,float* colArray,long l_start,long l,float* udata,float* vdata,float* lwData)
+__device__ long bird_AtSea(int id,int arrLength,float* rowArray,float* colArray,long int l_start,long int l,float* udata,float* vdata,float* lwData)
 {
 	printf("Inside the bird_atSea() function\n");
 	long count_timeSteps = l;
@@ -504,9 +504,9 @@ static void* write_dataVars(void* arguments)
 	return NULL;
 }
 //###########################################################################################################################################//
-long convert_to_month(int month,int day)
+long int convert_to_month(int month,int day)
 {
-	long index,offset;
+	long int index,offset;
 	if(month == 8){
 		index = 1; //The data starts in august
 	}
@@ -525,7 +525,7 @@ long convert_to_month(int month,int day)
 	}
 
 	//If 1st or 2nd of August, start at timestep 23 (after 23 hours)
-	if((month == 8) && (day == 1)||(month == 8) && (day == 2)){
+	if(((month == 8) && (day == 1))||((month == 8) && (day == 2))){
 		offset = 23;
 	//If in August; Gives correct result for starting timestep
 	}else if (month == 8){
@@ -543,7 +543,7 @@ long convert_to_month(int month,int day)
 
 //###########################################################################################################################################//
 
-__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long l_start,long cur_l,long max_timesteps,float* udata,float* vdata,float* u10data,float* v10data,
+__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int l_start,long int cur_l,long int max_timesteps,float* udata,float* vdata,float* u10data,float* v10data,
 				float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData)
 {
 
@@ -556,7 +556,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 	if(id > (NumOfBirds -1)) return;
 	else{
 		//Making a local copy of the timstep variable
-		long cur_l;
+		long int l;
 		l = cur_l;
 
 		long l_old;	
@@ -571,7 +571,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		int index;
 
 		arrLength = (TIMESTEPS + 1) - (int)l;
-		current_l = (int)(l -l_start);
+		current_l = (int)(cur_l - l_start);
 		index = id * ((TIMESTEPS + 1) - l) + (l -l_start);
 
 //		pos_row = id * arrLength + (l - l_start);
@@ -581,7 +581,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		printf("id * arrayLength is:%d\n",id*arrLength);
 		printf("Calculated array index value is: %d\n",index);
 
-
+		return;
 		slope = 0;
 		l_start = l;
 
@@ -716,7 +716,7 @@ int main(int argc,char* argv[])
 	char yearStr[4],monthStr[2],dayStr[2];
 
 	float starting_row,starting_col;
-	long offset_into_data = 0;
+	long int offset_into_data = 0;
 	int NumOfBirds,year,day,month;
 
 	int option;
@@ -772,13 +772,10 @@ int main(int argc,char* argv[])
 
 	/** Converting month and day information into number of timesteps; Special case of AUG 1st is also taken care of
 	Instead of AUG 1 it starts at August 2 (because data starts at 7pm but birds fly at 6pm) **/
-	if((month == 8) && (day == 1)){
-		offset_into_data = 22;
-	}
-	else {
-		offset_into_data = convert_to_month(month,day);
-	}
+	offset_into_data = convert_to_month(month,day);
+	
 	printf("Offset into data is: %ld\n",offset_into_data);
+
 //-----------------------------------------------Year-----------------------------------------//
 /** Checking if correct year specified **/
 
@@ -910,14 +907,15 @@ int main(int argc,char* argv[])
 	HANDLE_ERROR(cudaMallocHost((void**)&pressureData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
 
 	HANDLE_ERROR(cudaMallocHost((void**)&lwData,LAT_SIZE * LONG_SIZE * sizeof(float)));	
-	HANDLE_ERROR(cudaMallocHost((void**)&h_row,NumOfBirds * (TIMESTEPS + 1 - offset_into_data) * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&h_col,NumOfBirds * (TIMESTEPS + 1 - offset_into_data) * sizeof(float)));
-
+	//HANDLE_ERROR(cudaMallocHost((void**)&h_row,NumOfBirds * (TIMESTEPS + 1 - offset_into_data) * sizeof(float)));
+	//HANDLE_ERROR(cudaMallocHost((void**)&h_col,NumOfBirds * (TIMESTEPS + 1 - offset_into_data) * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&h_row,NumOfBirds * (TIMESTEPS + 1) * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&h_col,NumOfBirds * (TIMESTEPS + 1) * sizeof(float)));
 	
 
 	int ii;
 
-	for(ii=0;ii<(NumOfBirds * (TIMESTEPS + 1 - offset_into_data));ii++){
+	for(ii=0;ii<(NumOfBirds * (TIMESTEPS + 1));ii++){
 		*(h_row + ii) = starting_row;
 		*(h_col + ii) = starting_col;
 		//printf("%f\n",*(h_row+ii));
@@ -1037,12 +1035,12 @@ int main(int argc,char* argv[])
 
 	//return 0;
 //-------------------------------------------------------------------------------------------------------------------------//	
-	HANDLE_ERROR(cudaMalloc((void**)&d_row,NumOfBirds * (TIMESTEPS + 1 - offset_into_data) * sizeof(float)));	
-	HANDLE_ERROR(cudaMalloc((void**)&d_col,NumOfBirds * (TIMESTEPS + 1 - offset_into_data) * sizeof(float)));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_row,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float)));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_col,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float)));	
 	HANDLE_ERROR(cudaMalloc((void**)&d_lwData,LAT_SIZE * LONG_SIZE * sizeof(float)));	
 
-	HANDLE_ERROR(cudaMemcpy(d_row,h_row,NumOfBirds * (TIMESTEPS + 1 - offset_into_data) * sizeof(float),cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_col,h_col,NumOfBirds * (TIMESTEPS + 1 - offset_into_data) * sizeof(float),cudaMemcpyHostToDevice));
+	HANDLE_ERROR(cudaMemcpy(d_row,h_row,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyHostToDevice));
+	HANDLE_ERROR(cudaMemcpy(d_col,h_col,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyHostToDevice));
 	HANDLE_ERROR(cudaMemcpy(d_lwData,lwData,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyHostToDevice));
 //-------------------------------------------------------------------------------------------------------------//	
 
@@ -1055,9 +1053,9 @@ int main(int argc,char* argv[])
 	/** Getting the total remaining memory that the device can allocate **/
 	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
 
-	MemoryRemaining -= 2*NumOfBirds* (TIMESTEPS - offset_into_data);	
+	MemoryRemaining -= 2*NumOfBirds* (TIMESTEPS + 1);	
 	//Need to make sure 100MB is free!! For some reason
-	MemoryRemaining -= 100 * 1000000;
+	//MemoryRemaining -= 100 * 1000000;
 
 	
 	printf("Total mem: %zd,Free mem: %zd\n",TotalMemory,MemoryRemaining);
@@ -1111,9 +1109,11 @@ int main(int argc,char* argv[])
 
 	float *d_udata,*d_vdata,*d_u10data,*d_v10data;
 	float *d_precipData,*d_pressureData;
-	long current_timestep,max_timesteps;;
+	long int current_timestep,max_timesteps;;
 
 	current_timestep = offset_into_data;
+	printf("Current timestep variable is:%ld\n",current_timestep);
+	//return 0;
 
 	for(i=0;i<TotalTransfers-1;i++){
 		HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
@@ -1201,6 +1201,7 @@ d_u10data,d_v10data,d_u_dirAngle,d_v_dirAngle,d_precipData,d_pressureData,d_lwDa
 		HANDLE_ERROR(cudaFree(d_precipData));
 		HANDLE_ERROR(cudaFree(d_pressureData));
 
+		
 		ptrOffset+= DataPerTransfer/sizeof(float); 
 		printf("After all freeing %d\n",i);
 		
