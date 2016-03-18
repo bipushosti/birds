@@ -114,8 +114,9 @@ __device__ float bilinear_interpolation_SmallData(float x,float y,float* data_ar
 __device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,long l);
 
 __device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v);
-__device__ long int bird_AtSea(int id,int arrLength,float* rowArray,float* colArray,long l,float* udata,float* vdata,float* lwData,uint8_t* birdStatus);
-__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int l,long int maxtimesteps,float* udata,float* vdata,float* u10data,
+__device__ long int bird_AtSea(int id,int arrLength,float* rowArray,float* colArray,long int start_l,long int l,float* udata,float* vdata,float* lwData,uint8_t* birdStatus);
+
+__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int cur_l,long int max_timesteps,float* udata,float* vdata,float* u10data,
 				float* v10data,float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData,uint8_t* birdStatus);
 
 static void* write_dataVars(void* arguments);
@@ -249,7 +250,7 @@ __global__ void generate_kernel(curandState *states,float* numbers,float* angles
 
 //###########################################################################################################################################//
 
-__device__ long int bird_AtSea(int id,int arrLength,float* rowArray,float* colArray,long int l,float* udata,float* vdata,float* lwData,uint8_t* birdStatus)
+__device__ long int bird_AtSea(int id,int arrLength,float* rowArray,float* colArray,long int start_l,long int l,float* udata,float* vdata,float* lwData,uint8_t* birdStatus)
 {
 	printf("Inside the bird_atSea() function\n");
 	//long int count_timeSteps = l;
@@ -273,8 +274,8 @@ __device__ long int bird_AtSea(int id,int arrLength,float* rowArray,float* colAr
 	for(count_timeSteps = 0;count_timeSteps<(BIRD_HRS_LIMIT - 10);count_timeSteps++,l++){
 		
 		/** Bilinear interpolation for u and v data **/
-		u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l);	
-		v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l);
+		u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l-start_l);	
+		v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l-start_l);
 	
 		u_dir = DESIRED_SPEED * cosf(BIRD_SEA_ANGLE * (PI/180));
 		v_dir = DESIRED_SPEED * sinf(BIRD_SEA_ANGLE * (PI/180));
@@ -564,7 +565,7 @@ long int convert_to_month(int month,int day)
 
 //###########################################################################################################################################//
 
-__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int cur_l,long int max_timesteps,float* udata,float* vdata,float* u10data,float* v10data,
+__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int cur_l,long int max_timesteps,float* udata,float* vdata,float* u10data,float* v10data,
 				float* dir_u,float* dir_v,float* precipData,float* pressureData,float* lwData,uint8_t* birdStatus)
 {
 
@@ -579,12 +580,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 	}
 	
 	else{
-	//Error here?
-	//Make cur_l a global device variable?
-	//Need to be a range with two values
 		//Making a local copy of the timstep variable
 		long int l;
-		
 
 		long l_old;	
 		float profit_value,actualAngle;
@@ -592,14 +589,11 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		float u_ten,v_ten,u_val,v_val,uDir_value,vDir_value,precip_val;
 		int k,i;
 		float pos_row,pos_col;
-		//int current_l;
-		//Length of the row and column array for each bird
-		int arrLength;
+		int arrLength;//Length of the row and column array for each bird
 		int index;
 
 
 		l = cur_l;
-
 		arrLength = (TIMESTEPS + 1);
 		index = (int)(id * (TIMESTEPS + 1) + l);
 		
@@ -640,9 +634,12 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			uDir_value = dir_u[__float2int_rd(pos_row * LAT_SIZE + pos_col)];
 			vDir_value = dir_v[__float2int_rd(pos_row * LAT_SIZE + pos_col)];
 
+//##################Accesing should be relative; The l values should be adjusted when accesing as the arrays brought in
+//start index at 0(?)
+
 			printf("Current l is: %ld\n",l);
-			u_ten = bilinear_interpolation_LargeData(pos_col,pos_row,u10data,l);
-			v_ten = bilinear_interpolation_LargeData(pos_col,pos_row,v10data,l);
+			u_ten = bilinear_interpolation_LargeData(pos_col,pos_row,u10data,l-start_l);
+			v_ten = bilinear_interpolation_LargeData(pos_col,pos_row,v10data,l-start_l);
 
 			profit_value = getProfitValue(u_ten,v_ten,actualAngle,uDir_value,vDir_value);
 
@@ -654,9 +651,9 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 				for(k=0;k<6 && l<max_timesteps;k++,l++) {
 					//l = (int)(l -l_start);
 
-					u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l); 
-					v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l);
-					precip_val = bilinear_interpolation_LargeData(pos_col,pos_row,precipData,l);
+					u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l-start_l); 
+					v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l-start_l);
+					precip_val = bilinear_interpolation_LargeData(pos_col,pos_row,precipData,l-start_l);
 
 					//printf("End of bilinear interp for precip\n");
 					//Getting new position values for row and column
@@ -693,8 +690,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 						uDir_value = dir_u[__float2int_rd(pos_row * LAT_SIZE + pos_col)];
 						vDir_value = dir_v[__float2int_rd(pos_row * LAT_SIZE + pos_col)];
 
-						u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l);
-						v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l);
+						u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l-start_l);
+						v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l-start_l);
 					
 						//Getting new position values for row and column and storing it 
 						pos_row += (v_val + vDir_value ) * 0.36 * -1;
@@ -713,7 +710,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 // If at sea even after the 4 hours 	
 					if(lwData[__float2int_rd(pos_row * LAT_SIZE + pos_col)] != 1){
 						printf("Birds were at sea even after 10 hours \n");
-						l = bird_AtSea(id,arrLength,colArray,rowArray,l,udata,vdata,lwData,birdStatus);
+						l = bird_AtSea(id,arrLength,colArray,rowArray,start_l,l,udata,vdata,lwData,birdStatus);
 						if( l == -1){
 							return;
 						}
@@ -747,12 +744,12 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			//Taking the pressure from 6 hours earlier of the location where the bird landed
 			for(k=1; (l_old < l) && (k<=REGRESSION_HRS) && (l_old<max_timesteps); l_old++,k++){
 
-				pressure_sum += bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old);  //<----------------ERROR HERE
-				pressure_MultSum += k * bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old);
+				pressure_sum += bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old-start_l);  //<----------------ERROR HERE
+				pressure_MultSum += k * bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old-start_l);
 
 				//last_pressure is the last day or the day of flight
 				if(k == REGRESSION_HRS) {
-					last_pressure = bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old);
+					last_pressure = bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old-start_l);
 				}
 			}
 			slope = ((REGRESSION_HRS * pressure_MultSum) - (pressure_sum * HRS_SUM))/(DENOM_SLOPE);
@@ -1033,7 +1030,6 @@ int main(int argc,char* argv[])
 
 	/** Using pthreads to read from the files in parallel**/
 	pthread_t threads[8];
-	pthread_t id;
 
 	int i,j;
 	for(i=0;i<8;i++){
@@ -1193,7 +1189,7 @@ int main(int argc,char* argv[])
 
 //---------------------------------------Memory allocation per transfer----------------------------------------------------------//
 
-	long int cur_timestep,max_timesteps,ptrOffset;
+	long int start_timestep,cur_timestep,max_timesteps,ptrOffset;
 	ptrOffset = 0;
 	//min_timesteps = offset_into_data;
 	//printf("Current timestep variable is:%ld\n",min_timesteps);
@@ -1303,8 +1299,10 @@ int main(int argc,char* argv[])
 		}
 		*/
 
+		start_timestep = i * TimestepsPerTransfer;
+
 		if((max_timesteps - offset_into_data) > TimestepsPerTransfer){
-			cur_timestep = i * TimestepsPerTransfer;
+			cur_timestep = start_timestep;
 		}else{
 			cur_timestep = offset_into_data;
 		}
@@ -1312,7 +1310,7 @@ int main(int argc,char* argv[])
 
 		printf("Current timestep variable after checking if offset less than max_timesteps is:%ld\n",cur_timestep);
 
-		bird_movement<<<gridSize,blockSize>>>(d_row,d_col,NumOfBirds,cur_timestep,max_timesteps,d_udata,d_vdata,
+		bird_movement<<<gridSize,blockSize>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,max_timesteps,d_udata,d_vdata,
 						d_u10data,d_v10data,d_u_dirAngle,d_v_dirAngle,d_precipData,d_pressureData,d_lwData,d_birdStatus);
 
 
@@ -1364,23 +1362,25 @@ int main(int argc,char* argv[])
 
 	}
 */
+//-----------------------------------------------------------------------------------------------------------//
 //----------------------------------------------------Last Iteration-----------------------------------------//
-
+//-----------------------------------------------------------------------------------------------------------//
 
 	// Last iteration where the size might not be the same as others 
 	long int DataRemaining;
 	DataRemaining = LONG_SIZE * LAT_SIZE * TIMESTEPS * sizeof(float) - (DataPerTransfer * (TotalTransfers-1));
  	DataRemaining = DataRemaining/NUM_DATA_FILES;
 
-
+	start_timestep = (TotalTransfers - 1) * TimestepsPerTransfer;
 	max_timesteps = TIMESTEPS;
-	cur_timestep = (TotalTransfers - 1) * TimestepsPerTransfer;
 	ptrOffset = (DataPerTransfer/sizeof(float)) * (TotalTransfers - 1);
  
+
+//----------------------------------------------------------------------------------------//
+
 	HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
 	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
 	printf("Total mem: %zd,Free mem(Before any allocation): %zd\n",TotalMemory,MemoryRemaining);
-
 	
 	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
 	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
@@ -1444,14 +1444,15 @@ int main(int argc,char* argv[])
 
 //-----------------------------------------Calling the Kernel-------------------------------------------------//
 
+
 	if((max_timesteps - offset_into_data) > TimestepsLastTransfer){
-		cur_timestep = i * TimestepsPerTransfer;
+		cur_timestep = start_timestep;
 	}else{
 		cur_timestep = offset_into_data;
 	}
 
 	printf("Before calling the kernel\n");
-	bird_movement<<<gridSize,blockSize>>>(d_row,d_col,NumOfBirds,cur_timestep,max_timesteps,d_udata,d_vdata,
+	bird_movement<<<gridSize,blockSize>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,max_timesteps,d_udata,d_vdata,
 						d_u10data,d_v10data,d_u_dirAngle,d_v_dirAngle,d_precipData,d_pressureData,d_lwData,d_birdStatus);
 
 	HANDLE_ERROR(cudaDeviceSynchronize());
