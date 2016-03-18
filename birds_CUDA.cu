@@ -574,15 +574,17 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 	int id = y * LONG_SIZE + x;
 	//printf("Inside the kernel\n");
 
-	if(id > (NumOfBirds -1)||(birdStatus[id]==0)||(cur_l > max_timesteps)) return;
+	if(id > (NumOfBirds -1)||(birdStatus[id]==0)||(cur_l > max_timesteps)){ 
+		return;
+	}
+	
 	else{
 	//Error here?
 	//Make cur_l a global device variable?
 	//Need to be a range with two values
 		//Making a local copy of the timstep variable
 		long int l;
-		l = cur_l;
-		printf("Value of l is %ld\n",l);
+		
 
 		long l_old;	
 		float profit_value,actualAngle;
@@ -595,9 +597,14 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		int arrLength;
 		int index;
 
+
+		l = cur_l;
+
 		arrLength = (TIMESTEPS + 1);
-		//current_l = (int)(cur_l - l_start);
-		index = id * (TIMESTEPS + 1) + l;
+		index = (int)(id * (TIMESTEPS + 1) + l);
+		
+		slope = 0;
+		printf("Value of l is %ld\n",l);
 
 //		pos_row = id * arrLength + (l - l_start);
 		printf("Array length per bird is %d\n",arrLength);
@@ -607,7 +614,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		printf("Calculated array index value is: %d\n",index);
 
 		//return;
-		slope = 0;
+		
 
 		//while(l < (TOTAL_DAYS * TIMESTEPS_PER_DAY - 24)){
 		while(l < max_timesteps){
@@ -625,6 +632,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		
 
 			if((pos_row > LAT_SIZE) || (pos_col >LONG_SIZE)||(pos_row < 0)||(pos_col < 0 )){
+				birdStatus[id] = 0;
 				return;
 			}
 			//printf("After position calculations\n");
@@ -632,7 +640,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			uDir_value = dir_u[__float2int_rd(pos_row * LAT_SIZE + pos_col)];
 			vDir_value = dir_v[__float2int_rd(pos_row * LAT_SIZE + pos_col)];
 
-		
+			printf("Current l is: %ld\n",l);
 			u_ten = bilinear_interpolation_LargeData(pos_col,pos_row,u10data,l);
 			v_ten = bilinear_interpolation_LargeData(pos_col,pos_row,v10data,l);
 
@@ -646,7 +654,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 				for(k=0;k<6 && l<max_timesteps;k++,l++) {
 					//l = (int)(l -l_start);
 
-					u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l);
+					u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l); 
 					v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l);
 					precip_val = bilinear_interpolation_LargeData(pos_col,pos_row,precipData,l);
 
@@ -657,6 +665,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 					//printf("Calculating row and col values\n");
 
 					if((pos_row > LAT_SIZE) || (pos_col >LONG_SIZE)||(pos_row < 0)||(pos_col < 0 )){
+						birdStatus[id] = 0;
 						return;
 					}
 					//Storing the new values
@@ -732,11 +741,13 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			}
 
 			l_old = l - REGRESSION_HRS;
-
+	
+			pressure_sum = 0;
+			pressure_MultSum = 0;
 			//Taking the pressure from 6 hours earlier of the location where the bird landed
 			for(k=1; (l_old < l) && (k<=REGRESSION_HRS) && (l_old<max_timesteps); l_old++,k++){
 
-				pressure_sum += bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old);
+				pressure_sum += bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old);  //<----------------ERROR HERE
 				pressure_MultSum += k * bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old);
 
 				//last_pressure is the last day or the day of flight
@@ -1117,7 +1128,7 @@ int main(int argc,char* argv[])
 	
 //-------------------------------------------------------------------------------------------------------------//	
 	size_t MemoryEachVar,DataPerTransfer,SizePerTimestep;
-	int TimestepsPerTransfer,DaysPerTransfer;		
+	int TimestepsPerTransfer,TimestepsLastTransfer,DaysPerTransfer;		
 	size_t MemoryRemaining,TotalMemory;
 
 	HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
@@ -1150,7 +1161,6 @@ int main(int argc,char* argv[])
 	DataPerTransfer = (MemoryEachVar/SizePerTimestep) * SizePerTimestep;
 	DaysPerTransfer = DataPerTransfer/SizePerTimestep;
 	TimestepsPerTransfer = DaysPerTransfer * TIMESTEPS_PER_DAY;
-
 	printf("\t\tChecking Division: %zd\n",MemoryEachVar/SizePerTimestep);		
 	printf("\t\t Total Timesteps per Transfer of data is: %ld \n",TimestepsPerTransfer); 
 	printf("\t\tData per transfer is %zd\n",DataPerTransfer);	
@@ -1164,13 +1174,14 @@ int main(int argc,char* argv[])
 	divisible = (TOTAL_DAYS*TIMESTEPS_PER_DAY) % TimestepsPerTransfer;
 	
 	if(divisible != 0){
-			Transfers++;
+		Transfers++;
 	}
 	
 	printf("Total Transfers required: %ld\n",Transfers);
 	/** Tota bytes transfered per data transfer**/
 
 	const int TotalTransfers = Transfers;
+	TimestepsLastTransfer = (TOTAL_DAYS*TIMESTEPS_PER_DAY) - (Transfers-1)*TimestepsPerTransfer;
 /*
 	cudaStream_t stream[TotalTransfers-1];
 	for(i=0;i<TotalTransfers-1;i++){
@@ -1181,14 +1192,9 @@ int main(int argc,char* argv[])
 								- DataPerTransfer * (TotalTransfers-1); 
 
 //---------------------------------------Memory allocation per transfer----------------------------------------------------------//
-	
-	long int ptrOffset;
-	//ptrOffset = INITIAL_SKIP_TIMESTEPS;	
+
+	long int cur_timestep,max_timesteps,ptrOffset;
 	ptrOffset = 0;
-
-
-	long int cur_timestep,max_timesteps;
-
 	//min_timesteps = offset_into_data;
 	//printf("Current timestep variable is:%ld\n",min_timesteps);
 	//return 0;
@@ -1237,7 +1243,7 @@ int main(int argc,char* argv[])
 	
 		HANDLE_ERROR(cudaMalloc((void**)&d_birdStatus,NumOfBirds * sizeof(uint8_t)));
 		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After pressureData allocation): %zd\n",TotalMemory,MemoryRemaining);
+		printf("Total mem: %zd,Free mem(After birdStatus allocation): %zd\n",TotalMemory,MemoryRemaining);
 	
 		HANDLE_ERROR(cudaDeviceSynchronize());
 
@@ -1289,10 +1295,21 @@ int main(int argc,char* argv[])
 		printf("Offset into data is:%ld\n",offset_into_data);
 
 
-		if((offset_into_data <= max_timesteps) && (i > 0)){
-			offset_into_data = i * TimestepsPerTransfer;
+		/*if((offset_into_data <= max_timesteps) && (i > 0)){
+			cur_timestep = i * TimestepsPerTransfer;
+			//cur_timestep = offset_into_data;
+		}else{
 			cur_timestep = offset_into_data;
 		}
+		*/
+
+		if((max_timesteps - offset_into_data) > TimestepsPerTransfer){
+			cur_timestep = i * TimestepsPerTransfer;
+		}else{
+			cur_timestep = offset_into_data;
+		}
+
+
 		printf("Current timestep variable after checking if offset less than max_timesteps is:%ld\n",cur_timestep);
 
 		bird_movement<<<gridSize,blockSize>>>(d_row,d_col,NumOfBirds,cur_timestep,max_timesteps,d_udata,d_vdata,
@@ -1427,6 +1444,12 @@ int main(int argc,char* argv[])
 
 //-----------------------------------------Calling the Kernel-------------------------------------------------//
 
+	if((max_timesteps - offset_into_data) > TimestepsLastTransfer){
+		cur_timestep = i * TimestepsPerTransfer;
+	}else{
+		cur_timestep = offset_into_data;
+	}
+
 	printf("Before calling the kernel\n");
 	bird_movement<<<gridSize,blockSize>>>(d_row,d_col,NumOfBirds,cur_timestep,max_timesteps,d_udata,d_vdata,
 						d_u10data,d_v10data,d_u_dirAngle,d_v_dirAngle,d_precipData,d_pressureData,d_lwData,d_birdStatus);
@@ -1510,3 +1533,4 @@ int main(int argc,char* argv[])
 	printf("End\n");
 	return 0;
 }
+
