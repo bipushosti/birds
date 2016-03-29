@@ -362,7 +362,11 @@ __global__ void setup_kernel(unsigned int seed,curandState *states,int NumOfBird
 	//int blockId = blockIdx.y * gridDim.x + blockIdx.x;			 	
 	//int id = blockId * blockDim.x + threadIdx.x; 
 
-	if(id >= TotalTimesteps * NumOfBirds){
+	if((x >= TotalTimesteps) || (x < 0)){
+		return;
+	}else if((y>= NumOfBirds) || (y < 0)){
+		return;
+	}else if(id >= TotalTimesteps * NumOfBirds){
 		return;
 	}else{
 		curand_init(seed,id,0,&states[id]);
@@ -379,7 +383,11 @@ __global__ void generate_kernel(curandState *states,float* numbers,int NumOfBird
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
 	int id = y * TotalTimesteps + x;
 
-	if(id >= TotalTimesteps * NumOfBirds){
+	if((x >= TotalTimesteps) || (x < 0)){
+		return;
+	}else if((y>= NumOfBirds) || (y < 0)){
+		return;
+	}else if(id >= TotalTimesteps * NumOfBirds){
 		return;
 	}else{
 		//Making a local copy for efficiency
@@ -440,8 +448,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 {
 
 	//Thread indices
-	int blockId = blockIdx.y * gridDim.x + blockIdx.x;			 	
-	int id = blockId * blockDim.x + threadIdx.x; 
+	//int blockId = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int id = blockIdx.x * blockDim.x + threadIdx.x; 
 	//printf("Inside the kernel\n");
 
 	if(id > (NumOfBirds -1)||(birdStatus[id]==0)||(cur_l > max_timesteps)){ 
@@ -569,7 +577,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 						uDir_value = DesiredSpeed * cosf(wrappedAngle * (pi/180));
 						vDir_value = DesiredSpeed * sinf(wrappedAngle * (pi/180));
 
-
+						printf("l,row,col,start_l,l-start_l:: %ld,%f,%f,%f,%f\n",l,pos_row,pos_col,start_l,l-start_l);
 						u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l-start_l);
 						v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l-start_l);
 					
@@ -1425,21 +1433,21 @@ int main(int argc,char* argv[])
 
 	}
 */
-//-----------------------------------------------------------------------------------------------------------//
+//---------------------------------------------------------------------------------------------------------------------------------------------------------//
 //----------------------------------------------------Last Iteration-----------------------------------------//
 //-----------------------------------------------------------------------------------------------------------//
 
 	// Last iteration where the size might not be the same as others 
 	long int DataRemaining;
 	DataRemaining = (LONG_SIZE * LAT_SIZE * TIMESTEPS * sizeof(float)) - (DataPerTransfer * (TotalTransfers-1));
- 	DataRemaining = DataRemaining/NUM_DATA_FILES;
+ //	DataRemaining = DataRemaining/NUM_DATA_FILES;
 
 	start_timestep = (TotalTransfers - 1) * TimestepsPerTransfer;
 	max_timesteps = TIMESTEPS;
 	ptrOffset = (DataPerTransfer/sizeof(float)) * (TotalTransfers - 1);
 	
 	dim3 gridSize((NumOfBirds + 32 - 1)/32,1,1);
-	dim3 blockSize(32,1,1);
+	dim3 blockSize(32,1,1); 
 //----------------------------------------------------------------------------------------//
 
 	HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
@@ -1514,6 +1522,8 @@ int main(int argc,char* argv[])
 	}else{
 		cur_timestep = offset_into_data;
 	}
+
+
 
 	printf("Before calling the kernel\n");
 	bird_movement<<<gridSize,blockSize>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,max_timesteps,d_udata,d_vdata,
