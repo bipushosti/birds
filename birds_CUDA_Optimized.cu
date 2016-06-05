@@ -151,6 +151,7 @@ __device__ __constant__ int TotalTimesteps = TIMESTEPS;
 __device__ __constant__ int LatSize = LAT_SIZE;
 __device__ __constant__ int LongSize = LONG_SIZE;
 __device__ __constant__ float pi = PI;
+__device__ __constant__ int InitialSkipTimesteps = INITIAL_SKIP_TIMESTEPS;
 
 
 __device__ __constant__ int StdBirdAngle = STD_BIRDANGLE;
@@ -174,7 +175,7 @@ __device__ long int bird_AtSea_Within24Hrs(int id,int arrLength,float* rowArray,
 float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product)
 {
 	float u_val,v_val,u_dir,v_dir,pos_row,pos_col;
-	int index = 0;
+	float index = 0;
 	long int bckp_l;
 	float count_timeSteps = 0;
 	uint8_t var_product2;
@@ -207,10 +208,10 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product)
 		printf("At sea within 24 hours; \tRow: %f,Col:%f\n",rowArray[id * arrLength + l],colArray[id * arrLength + l]);
 		printf("At sea within 24 hours; Timestep #: %ld\n",l);
 
-		index = lwData[__float2int_rd(pos_row * LatSize + pos_col)];
-		printf("Index after 10 hours is %d\n",index);
+		index = lwData[__float2int_rd(pos_row * LongSize + pos_col)];
+		printf("Index after 10 hours is %f\n",index);
 
-		if(index == 1){
+		if(index == 1.0){
 			var_product2 = 0;		
 		}
 	
@@ -291,7 +292,7 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,
 
 		l = l + var_product2;
 
-		if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
+		if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0.0)||(pos_col < 0.0 )){
 			birdStatus[id] = 0;
 		}
 	}
@@ -464,8 +465,11 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 	//Thread indices
 	int id = blockIdx.x * blockDim.x + threadIdx.x; 
 
-	if(id > (NumOfBirds -1)||(birdStatus[id]==0)||(cur_l > max_timesteps)){ 
-	//if((id > (NumOfBirds -1))||(cur_l > max_timesteps)){ 
+	//if(id > (NumOfBirds -1)||(birdStatus[id]==0)||(cur_l > max_timesteps)){ 
+
+	//The condition cur_l > max_timesteps is OK now because all birds start at the same time
+	//Not OK once birds start flying at different times
+	if((id > (NumOfBirds -1))||(cur_l > max_timesteps)){ 
 		return;
 	}
 	
@@ -474,15 +478,13 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		long int l,new_l;
 
 		long l_old;	
-		float profit_value,actualAngle,wrappedAngle;
+		float profit_value,actualAngle,wrappedAngle, index;
 		float last_pressure,pressure_sum,pressure_MultSum,slope;
 		float u_ten,v_ten,u_val,v_val,uDir_value,vDir_value,precip_val;
 		int k,i;
 		float pos_row,pos_col;
 		int arrLength;
 
-		//Length of the row and column array for each bird
-		int index;
 
 		uint8_t var_sea, var_profit_10m, var_10hrsSea, var_product, l_product;
 
@@ -490,8 +492,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		l = cur_l;
 		new_l = l;
 		arrLength = (TotalTimesteps + 1);
-		index = (int)(id * (TotalTimesteps + 1) + l);
-		
+	
+
 		slope = 0;
 		printf("Value of l is %ld\n",l);
 
@@ -499,7 +501,6 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		printf("id is %d\n",id);
 
 		printf("id * arrayLength is:%d\n",id*arrLength);
-		printf("Calculated array index value is: %d\n",index);
 
 		
 		while(l < max_timesteps){
@@ -594,13 +595,14 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			pos_col = colArray[id * arrLength + l - 1];
 			
 
+			index = lwData[__float2int_rd(pos_row * LatSize + pos_col)];
 			// If the bird is at sea after the first 6 hours of flight 
-			if(lwData[__float2int_rd(pos_row * LatSize + pos_col)] != 1){
-				var_sea = 1;
-				printf("At sea after 6 hours \n");
-			}else{
+			if( index == 1.0){
 				var_sea = 0;
 				printf("Not at sea after 6 hours \n");
+			}else{
+				var_sea = 1;
+				printf("At sea after 6 hours \n");
 			}
 
 			//Getting the wrapped angle; Same uDir_value and vDir_value used for the 4 hours
@@ -644,14 +646,17 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 				l = l + 1;
 			}
 
+//------------------------
 
-//------------------------	
-			if(lwData[__float2int_rd(pos_row * LatSize + pos_col)] != 1){
-				var_10hrsSea = 1;
-				printf("At sea after 10 hours \n");
-			}else{
+			index = lwData[__float2int_rd(pos_row * LongSize + pos_col)];
+	
+
+			if(index == 1){
 				var_10hrsSea = 0;
 				printf("Not at sea after 10 hours \n");
+			}else{
+				var_10hrsSea = 1;
+				printf("At sea after 10 hours \n");
 			}
 			
 //----------------------- If at sea even after the 10 hours but within 24 hours		
@@ -659,21 +664,23 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			l = bird_AtSea_Within24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product);
 //------------------------						
 
-			if(lwData[__float2int_rd(pos_row * LatSize + pos_col)] != 1){
+			index = lwData[__float2int_rd(pos_row * LongSize + pos_col)];
+			if(index == 1.0){
+				var_10hrsSea = 0;
+				printf("Not at sea after 24 hours \n");
+			}else{
 				var_10hrsSea = 1;
 				printf("At sea after 24 hours \n");
-			}else{
-				var_10hrsSea = 0;
 			}
 //----------------------- If at sea even after the the 10 hours and beyond 24 hours 	
 
-/*	
+	
 			var_product = birdStatus[id] * var_profit_10m * var_sea * var_10hrsSea;
 			if(var_product == 1){ 
 				printf("At sea after 24 hours \n");
 			}
 			new_l = bird_AtSea_After24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product,l_product);
-*/
+
 //------------------------	
 
 			l_old = l - RegressionHrs;
@@ -1261,12 +1268,12 @@ int main(int argc,char* argv[])
 	
 	printf("Total mem: %zd,Free mem: %zd\n",TotalMemory,MemoryRemaining);
 
- 	printf("\n\n\t\t Total Memory remaining is: %zd \n",MemoryRemaining);
+ 	printf("\n\n\t\tTotal Memory remaining is: %zd \n",MemoryRemaining);
 
 	//Memory that each variable gets every timestep
 	MemoryEachVar = MemoryRemaining/NUM_DATA_FILES;
 
-	printf("\t\t Memory for each variable is: %zd \n",MemoryEachVar);
+	printf("\t\tMemory for each variable is: %zd \n",MemoryEachVar);
 
 	// Need to send data per timestep so has to be a multiple of LAT_SIZE *LONG_SIZE* sizeof(float) * 24
 	//Can also be called as Minimum_Size_Per_Timestep; Sending data so that it is according to days
@@ -1279,22 +1286,23 @@ int main(int argc,char* argv[])
 	DaysPerTransfer = DataPerTransfer/SizePerTimestep;
 	TimestepsPerTransfer = DaysPerTransfer * TIMESTEPS_PER_DAY;
 	printf("\t\tChecking Division: %zd\n",MemoryEachVar/SizePerTimestep);		
-	printf("\t\t Total Timesteps per Transfer of data is: %ld \n",TimestepsPerTransfer); 
-	printf("\t\tData per transfer is %zd\n",DataPerTransfer);	
+	printf("\t\tTotal Timesteps per Transfer of data is: %ld \n",TimestepsPerTransfer); 
+	printf("\t\tData per transfer is %zd\n",DataPerTransfer);
+	printf("\t\tDays per transfer is %zd\n",DaysPerTransfer);		
 	
 //------------------------------------Getting the size of data needed per transfer---------------------------------------------//
 	int divisible,Transfers;
 //	long int DataLastTransfer;//Per variable
 
-	Transfers = (TIMESTEPS) / TimestepsPerTransfer;
+	Transfers = (TIMESTEPS - INITIAL_SKIP_TIMESTEPS) / TimestepsPerTransfer;
 
-	divisible = (TIMESTEPS) % TimestepsPerTransfer;
+	divisible = (TIMESTEPS - INITIAL_SKIP_TIMESTEPS) % TimestepsPerTransfer;
 	
 	if(divisible != 0){
 		Transfers++;
 	}
 	
-	printf("Total Transfers required: %ld\n",Transfers);
+	printf("\t\tTotal Transfers required: %ld\n\n",Transfers);
 	/** Tota bytes transfered per data transfer**/
 
 	const int TotalTransfers = Transfers;
@@ -1310,7 +1318,7 @@ int main(int argc,char* argv[])
 //---------------------------------------Memory allocation per transfer----------------------------------------------------------//
 
 	long int start_timestep,cur_timestep,max_timesteps,ptrOffset;
-	ptrOffset = 0;
+	ptrOffset = INITIAL_SKIP_TIMESTEPS;
 
 	cur_timestep = offset_into_data;
 
@@ -1399,7 +1407,7 @@ int main(int argc,char* argv[])
 		
 		//All of these are inclusive
 		//If TimeStepsPerTransfer is 9, then they would be: 0-8, 9-17, 18-26,...
-		max_timesteps = ((i+1) * TimestepsPerTransfer) - 1;
+		max_timesteps = ((i+1) * TimestepsPerTransfer) - 1 + INITIAL_SKIP_TIMESTEPS;
 		
 
 		printf("Current timestep variable is:%ld\n",cur_timestep);
@@ -1407,7 +1415,7 @@ int main(int argc,char* argv[])
 		printf("Offset into data is:%ld\n",offset_into_data);
 
 
-		start_timestep = i * TimestepsPerTransfer;
+		start_timestep = i * TimestepsPerTransfer + INITIAL_SKIP_TIMESTEPS;
 
 		if((max_timesteps - offset_into_data) > TimestepsPerTransfer){
 			cur_timestep = start_timestep;
@@ -1440,7 +1448,7 @@ int main(int argc,char* argv[])
 		HANDLE_ERROR(cudaFree(d_pressureData));
 
 		
-		ptrOffset = (DataPerTransfer/sizeof(float)) * (i + 1);
+		ptrOffset = (DataPerTransfer/sizeof(float)) * (i + 1) + INITIAL_SKIP_TIMESTEPS;
 		printf("After all freeing %d\n",i);
 		
 	}
@@ -1475,9 +1483,9 @@ int main(int argc,char* argv[])
 	long int DataRemaining;
 	DataRemaining = (LONG_SIZE * LAT_SIZE * TIMESTEPS * sizeof(float)) - (DataPerTransfer * (TotalTransfers-1));
 
-	start_timestep = (TotalTransfers - 1) * TimestepsPerTransfer;
+	start_timestep = (TotalTransfers - 1) * TimestepsPerTransfer + INITIAL_SKIP_TIMESTEPS;
 	max_timesteps = TIMESTEPS;
-	ptrOffset = (DataPerTransfer/sizeof(float)) * (TotalTransfers - 1);
+	ptrOffset = (DataPerTransfer/sizeof(float)) * (TotalTransfers - 1) + INITIAL_SKIP_TIMESTEPS;
 	
 	dim3 gridSize((NumOfBirds + 32 - 1)/32,1,1);
 	dim3 blockSize(32,1,1); 
