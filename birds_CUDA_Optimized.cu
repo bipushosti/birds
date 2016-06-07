@@ -1104,7 +1104,7 @@ int main(int argc,char* argv[])
 	float *d_udata,*d_vdata,*d_u10data,*d_v10data,*d_lwData;
 	float *d_dirData,*d_precipData,*d_pressureData;
 	uint8_t *h_birdStatus,*d_birdStatus;
-
+/*
 	dirData = (float*) malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
 	h_row = (float*) malloc(NumOfBirds * (TIMESTEPS + 1) * sizeof(float));
 	h_col = (float*) malloc(NumOfBirds * (TIMESTEPS + 1) * sizeof(float));
@@ -1117,20 +1117,23 @@ int main(int argc,char* argv[])
 	v10data = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
 	precipData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
 	pressureData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
-	
+*/	
 
 //------------------------------------------------------------------------------------------------------------------//
-/*
+
+	HANDLE_ERROR(cudaMallocHost((void**)&dirData,LAT_SIZE * LONG_SIZE * sizeof(float)));	
+	HANDLE_ERROR(cudaMallocHost((void**)&h_row,NumOfBirds * (TIMESTEPS + 1) * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&h_col,NumOfBirds * (TIMESTEPS + 1) * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void**)&h_birdStatus,NumOfBirds * sizeof(uint8_t)));
+	HANDLE_ERROR(cudaMallocHost((void**)&lwData,LAT_SIZE * LONG_SIZE * sizeof(float)));
+
 	HANDLE_ERROR(cudaMallocHost((void**)&udata,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
 	HANDLE_ERROR(cudaMallocHost((void**)&vdata,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
 	HANDLE_ERROR(cudaMallocHost((void**)&u10data,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));	
 	HANDLE_ERROR(cudaMallocHost((void**)&v10data,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
 	HANDLE_ERROR(cudaMallocHost((void**)&precipData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
 	HANDLE_ERROR(cudaMallocHost((void**)&pressureData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&lwData,LAT_SIZE * LONG_SIZE * sizeof(float)));	
-*/
 
-	
 	printf("Size of large arrays is %zd\n",sizeof(udata)/sizeof(udata[0]));
 	printf("Size of large arrays is %ld\n",sizeof(udata)/sizeof(float));
 	printf("Size of large arrays is %d\n",sizeof(udata)/sizeof(float));
@@ -1244,13 +1247,22 @@ int main(int argc,char* argv[])
 	HANDLE_ERROR(cudaMalloc((void**)&d_col,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float)));	
 	HANDLE_ERROR(cudaMalloc((void**)&d_lwData,LAT_SIZE * LONG_SIZE * sizeof(float)));
 	HANDLE_ERROR(cudaMalloc((void**)&d_dirData,LAT_SIZE * LONG_SIZE * sizeof(float)));
+	HANDLE_ERROR(cudaMalloc((void**)&d_birdStatus,NumOfBirds * sizeof(uint8_t)));
+
+	cudaStream_t streams_posData[5];
+	for(i=0;i<4;i++){
+		HANDLE_ERROR(cudaStreamCreate(&streams_posData[i]));
+	}
 
 
-	HANDLE_ERROR(cudaMemcpy(d_row,h_row,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_col,h_col,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_lwData,lwData,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_dirData,dirData,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyHostToDevice));
-//-------------------------------------------------------------------------------------------------------------//	
+	HANDLE_ERROR(cudaMemcpyAsync(d_row,h_row,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyHostToDevice,streams_posData[0]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_col,h_col,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyHostToDevice,streams_posData[1]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_lwData,lwData,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyHostToDevice,streams_posData[2]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_dirData,dirData,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyHostToDevice,streams_posData[3]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_birdStatus,h_birdStatus,NumOfBirds * sizeof(uint8_t),cudaMemcpyHostToDevice,streams_posData[4]));
+
+//-------------------------------------------------------------------------------------------------------------//
+/*	
 	size_t MemoryEachVar,DataPerTransfer,SizePerTimestep;
 	int TimestepsPerTransfer,TimestepsLastTransfer,DaysPerTransfer;		
 	size_t MemoryRemaining,TotalMemory;
@@ -1303,11 +1315,11 @@ int main(int argc,char* argv[])
 	}
 	
 	printf("\t\tTotal Transfers required: %ld\n\n",Transfers);
-	/** Tota bytes transfered per data transfer**/
+	// Tota bytes transfered per data transfer
 
 	const int TotalTransfers = Transfers;
 	TimestepsLastTransfer = (TIMESTEPS) - (Transfers-1)*TimestepsPerTransfer;
-/*
+
 	cudaStream_t stream[TotalTransfers-1];
 	for(i=0;i<TotalTransfers-1;i++){
 		HANDLE_ERROR(cudaStreamCreate(&stream[i]));
@@ -1315,94 +1327,66 @@ int main(int argc,char* argv[])
 */
 	//DataLastTransfer = (TIMESTEPS * LAT_SIZE * LONG_SIZE * sizeof(float)) - (DataPerTransfer * (TotalTransfers-1)); 
 
-//---------------------------------------Memory allocation per transfer----------------------------------------------------------//
+//---------------------------------------Destroying the Streams created----------------------------------------------------------//
+	HANDLE_ERROR(cudaDeviceSynchronize());
 
+	for(i=0;i<4;i++){
+		HANDLE_ERROR(cudaStreamSynchronize(streams_posData[i]));
+		HANDLE_ERROR(cudaStreamDestroy(streams_posData[i]));
+	}
+
+//------------------------------------Getting the size of data needed per transfer---------------------------------------------//
+
+	int DaysPerTransfer = 3;
+	int DaysTransferrable = TOTAL_DAYS - 1 - (DaysPerTransfer - 1);
+
+	int TimestepsPerTransfer = DaysPerTransfer * TIMESTEPS_PER_DAY;
+	size_t DataPerTransfer = TimestepsPerTransfer * LAT_SIZE * LONG_SIZE * sizeof(float);
+
+	//Hardcoded because 119/7 = 17 exactly
+	const int total_streams = 7;
+
+
+	cudaStream_t streams[total_streams];
+
+	for(i = 0;i<total_streams;i++){
+		HANDLE_ERROR(cudaStreamCreate(&streams[i]));
+	}
+//-------------------------------------------------------------------------------------------------------------//
 	long int start_timestep,cur_timestep,max_timesteps,ptrOffset;
 	ptrOffset = INITIAL_SKIP_TIMESTEPS;
 
 	cur_timestep = offset_into_data;
+	HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
 
-	for(i=0;i<TotalTransfers-1;i++){
+	HANDLE_ERROR(cudaMalloc((void**)&d_udata,DataPerTransfer * total_streams));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_vdata,DataPerTransfer * total_streams));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_u10data,DataPerTransfer * total_streams));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_v10data,DataPerTransfer * total_streams));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_precipData,DataPerTransfer * total_streams));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_pressureData,DataPerTransfer * total_streams));
 
+
+	//For the iteration time this is necessary
+	HANDLE_ERROR(cudaMemcpyAsync(d_udata,udata+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_vdata,vdata+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_u10data,u10data+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_v10data,v10data+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_precipData,precipData+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_pressureData,pressureData+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
+
+
+
+	dim3 gridSize((NumOfBirds + 32 - 1)/32,1,1);
+	dim3 blockSize(32,1,1);
+
+
+	int current_index, next_index;
+
+	for(i=0;i<DaysTransferrable;i++){
 
 		HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(Before any allocation): %zd\n",TotalMemory,MemoryRemaining);
 
-		
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
-
-		//HANDLE_ERROR(cudaStreamCreate(&stream[i]));
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After Stream Create): %zd\n",TotalMemory,MemoryRemaining);
-
-		HANDLE_ERROR(cudaMalloc((void**)&d_udata,DataPerTransfer));	
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After udata allocation): %zd\n",TotalMemory,MemoryRemaining);
-	
-		HANDLE_ERROR(cudaMalloc((void**)&d_vdata,DataPerTransfer));	
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After vdata allocation): %zd\n",TotalMemory,MemoryRemaining);
-
-		HANDLE_ERROR(cudaMalloc((void**)&d_u10data,DataPerTransfer));	
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After u10data allocation): %zd\n",TotalMemory,MemoryRemaining);
-
-		HANDLE_ERROR(cudaMalloc((void**)&d_v10data,DataPerTransfer));	
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After v10data allocation): %zd\n",TotalMemory,MemoryRemaining);
-
-		HANDLE_ERROR(cudaMalloc((void**)&d_precipData,DataPerTransfer));	
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After precipData allocation): %zd\n",TotalMemory,MemoryRemaining);
-
-		HANDLE_ERROR(cudaMalloc((void**)&d_pressureData,DataPerTransfer));	
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After pressureData allocation): %zd\n",TotalMemory,MemoryRemaining);
-	
-		HANDLE_ERROR(cudaMalloc((void**)&d_birdStatus,NumOfBirds * sizeof(uint8_t)));
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After birdStatus allocation): %zd\n",TotalMemory,MemoryRemaining);
-	
-		HANDLE_ERROR(cudaDeviceSynchronize());
-
-
-		printf("After all the host allocations %d\n",i);
-
-
-
-	//-----------------------------------------Initializing gridSize and block Size-------------------------------//		
-		//HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
-
-		dim3 gridSize((NumOfBirds + 32 - 1)/32,1,1);
-		dim3 blockSize(32,1,1);
-
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After grid and block init): %zd\n",TotalMemory,MemoryRemaining);
-	//-----------------------------------------Copying data from CPU to GPU------------------------------------------------//	
-
-		HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));	
-
-		HANDLE_ERROR(cudaMemcpy(d_udata,udata+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice));
-		HANDLE_ERROR(cudaMemcpy(d_vdata,vdata+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice));
-		HANDLE_ERROR(cudaMemcpy(d_u10data,u10data+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice));
-		HANDLE_ERROR(cudaMemcpy(d_v10data,v10data+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice));
-		HANDLE_ERROR(cudaMemcpy(d_precipData,precipData+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice));
-		HANDLE_ERROR(cudaMemcpy(d_pressureData,pressureData+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice));
-		HANDLE_ERROR(cudaMemcpy(d_birdStatus,h_birdStatus,NumOfBirds * sizeof(uint8_t),cudaMemcpyHostToDevice));
-
-/*
-		HANDLE_ERROR(cudaMemcpyAsync(d_lwData,lwData,LAT_SIZE * LONG_SIZE * sizeof(float),cudaMemcpyHostToDevice,stream[i]));
-		HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-		printf("Total mem: %zd,Free mem(After grid and block init): %zd\n",TotalMemory,MemoryRemaining);
-		HANDLE_ERROR(cudaMemcpyAsync(d_udata,udata + ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,stream[i]));
-		HANDLE_ERROR(cudaMemcpyAsync(d_vdata,(vdata+ptrOffset),DataPerTransfer,cudaMemcpyHostToDevice,stream[i]));
-		HANDLE_ERROR(cudaMemcpyAsync(d_u10data,(u10data+ptrOffset),DataPerTransfer,cudaMemcpyHostToDevice,stream[i]));
-		HANDLE_ERROR(cudaMemcpyAsync(d_v10data,(v10data+ptrOffset),DataPerTransfer,cudaMemcpyHostToDevice,stream[i]));
-		HANDLE_ERROR(cudaMemcpyAsync(d_precipData,(precipData+ptrOffset),DataPerTransfer,cudaMemcpyHostToDevice,stream[i]));
-		HANDLE_ERROR(cudaMemcpyAsync(d_pressureData,(pressureData+ptrOffset),DataPerTransfer,cudaMemcpyHostToDevice,stream[i]));
-*/
 	//-----------------------------------------Calling the Kernel-----------------------------------------------------------//
 		
 		//All of these are inclusive
@@ -1426,32 +1410,33 @@ int main(int argc,char* argv[])
 
 		printf("Current timestep variable after checking if offset less than max_timesteps is:%ld\n",cur_timestep);
 
-		bird_movement<<<gridSize,blockSize>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,max_timesteps,d_udata,d_vdata,
+		current_index = i/total_streams;
+		next_index = i/total_streams;
+
+
+		bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,max_timesteps,d_udata,d_vdata,
 						d_u10data,d_v10data,d_dirData,rand_norm_nums,d_precipData,d_pressureData,d_lwData,d_birdStatus);
 
 
-		//HANDLE_ERROR(cudaStreamSynchronize(stream[i]));
+		HANDLE_ERROR(cudaMemcpyAsync(d_udata,udata+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+		HANDLE_ERROR(cudaMemcpyAsync(d_vdata,vdata+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+		HANDLE_ERROR(cudaMemcpyAsync(d_u10data,u10data+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+		HANDLE_ERROR(cudaMemcpyAsync(d_v10data,v10data+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+		HANDLE_ERROR(cudaMemcpyAsync(d_precipData,precipData+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+		HANDLE_ERROR(cudaMemcpyAsync(d_pressureData,pressureData+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+
 		HANDLE_ERROR(cudaDeviceSynchronize());
-	//---------------------------------Freeing allocated memory in GPU and pinned memory in CPU-------------------//
-		printf("Before freeing;Inside the loop\n");
-
-		HANDLE_ERROR(cudaMemcpy(h_birdStatus,d_birdStatus,NumOfBirds * sizeof(uint8_t),cudaMemcpyDeviceToHost));
-
-
-
-		//HANDLE_ERROR(cudaStreamDestroy(stream[i]));	
-		HANDLE_ERROR(cudaFree(d_udata));
-		HANDLE_ERROR(cudaFree(d_vdata));
-		HANDLE_ERROR(cudaFree(d_u10data));
-		HANDLE_ERROR(cudaFree(d_v10data));
-		HANDLE_ERROR(cudaFree(d_precipData));
-		HANDLE_ERROR(cudaFree(d_pressureData));
-
-		
+	
 		ptrOffset = (DataPerTransfer/sizeof(float)) * (i + 1) + INITIAL_SKIP_TIMESTEPS;
-		printf("After all freeing %d\n",i);
 		
 	}
+
+	HANDLE_ERROR(cudaFree(d_udata));
+	HANDLE_ERROR(cudaFree(d_vdata));
+	HANDLE_ERROR(cudaFree(d_u10data));
+	HANDLE_ERROR(cudaFree(d_v10data));
+	HANDLE_ERROR(cudaFree(d_precipData));
+	HANDLE_ERROR(cudaFree(d_pressureData));
 /*
 	HANDLE_ERROR(cudaMemcpy(h_row,d_row,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyDeviceToHost));
 	HANDLE_ERROR(cudaMemcpy(h_col,d_col,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyDeviceToHost));
@@ -1475,10 +1460,10 @@ int main(int argc,char* argv[])
 
 	}
 */
-//---------------------------------------------------------------------------------------------------------------------------------------------------------//
+//-----------------------------------------------------------------------------------------------------------//
 //----------------------------------------------------Last Iteration-----------------------------------------//
 //-----------------------------------------------------------------------------------------------------------//
-
+/*
 	// Last iteration where the size might not be the same as others 
 	long int DataRemaining;
 	DataRemaining = (LONG_SIZE * LAT_SIZE * TIMESTEPS * sizeof(float)) - (DataPerTransfer * (TotalTransfers-1));
@@ -1587,8 +1572,13 @@ int main(int argc,char* argv[])
 		fprintf(birdStatusTxt,"%d\n",h_birdStatus[i]);
 	}
 	//Get birdStatus array back as well
+*/
 //-----------------------------------------------Freeing allocated memory--------------------------------------//
-//	HANDLE_ERROR(cudaStreamDestroy(stream[0]));
+	for(i = 0;i<total_streams;i++){
+		HANDLE_ERROR(cudaStreamDestroy(streams[i]));
+	}
+
+
 	HANDLE_ERROR(cudaFree(rand_norm_nums));
 	HANDLE_ERROR(cudaFree(d_birdStatus));		
 	HANDLE_ERROR(cudaFree(d_udata));
