@@ -13,6 +13,11 @@
 
 #include <pthread.h>
 #include <string.h>
+
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include <curand_kernel.h>
+
 #include <math.h>
 #include <float.h>
 
@@ -27,11 +32,11 @@
 //#include "birds_CUDA.h"
 //#define CUDA_API_PER_THREAD_DEFAULT_STREAM
 
-
+/*
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <curand_kernel.h>
-
+*/
 
 #define PI 			3.14159
 #define LONG_SIZE		429
@@ -205,11 +210,11 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product)
 		rowArray[id * arrLength + l] = pos_row;
 		colArray[id * arrLength + l] = pos_col;
 
-		printf("At sea within 24 hours; \tRow: %f,Col:%f\n",rowArray[id * arrLength + l],colArray[id * arrLength + l]);
-		printf("At sea within 24 hours; Timestep #: %ld\n",l);
+		//printf("At sea within 24 hours; \tRow: %f,Col:%f\n",rowArray[id * arrLength + l],colArray[id * arrLength + l]);
+		//printf("At sea within 24 hours; Timestep #: %ld\n",l);
 
 		index = lwData[__float2int_rd(pos_row * LongSize + pos_col)];
-		printf("Index after 10 hours is %f\n",index);
+		//printf("Index after 10 hours is %f\n",index);
 
 		if(index == 1.0){
 			var_product2 = 0;		
@@ -245,29 +250,29 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,
 
 	pos_row = rowArray[id * arrLength + l ];
 	pos_col = colArray[id * arrLength + l ];
-	printf("After getting the first row and cols (Inside After 24 hours function)\n");
+	//printf("After getting the first row and cols (Inside After 24 hours function)\n");
 
 	u_dir = DesiredSpeed * cosf(BirdSeaAngle * (pi/180));
 	v_dir = DesiredSpeed * sinf(BirdSeaAngle * (pi/180));
 	
-/*
+
 	if(l_product == 0){
 		timesteps_limit = 24;
 	}else{
 		timesteps_limit = BirdHrsLimit;
 	}
-*/
 
-	printf("After getting the timestep limit (Inside After 24 hours function)\n");
+
+	//printf("After getting the timestep limit (Inside After 24 hours function)\n");
 	//This loop is skipped if a bird is not at sea after 24 hours
 	for(count_timeSteps = 24; count_timeSteps < timesteps_limit; count_timeSteps++){
 
 		var_product2 = var_product2 * birdStatus[id]; 
-		printf("Count Timesteps:: %d\n",count_timeSteps);
+		//printf("Count Timesteps:: %d\n",count_timeSteps);
 		
 		
-		printf("l:%ld, start_l: %ld \n",l,start_l);
-		printf("l-start_l:%ld\n",l-start_l);
+		//printf("l:%ld, start_l: %ld \n",l,start_l);
+		//printf("l-start_l:%ld\n",l-start_l);
 		/** Bilinear interpolation for u and v data **/
 		u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l-start_l);	
 		v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l-start_l);
@@ -278,8 +283,8 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,
 		pos_row = pos_row + var_product2 * (v_val + v_dir) * 0.36 * -1;	
 		pos_col = pos_col + var_product2 * (u_val + u_dir) * 0.36;
 
-		printf("At sea after 24 hours; \tRow: %f,Col:%f\n",rowArray[id * arrLength + l],colArray[id * arrLength + l]);
-		printf("At sea after 24 hours; Timestep #: %ld\n",l);
+		//printf("At sea after 24 hours; \tRow: %f,Col:%f\n",rowArray[id * arrLength + l],colArray[id * arrLength + l]);
+		//printf("At sea after 24 hours; Timestep #: %ld\n",l);
 
 		rowArray[id * arrLength + l + 1] = pos_row;
 		colArray[id * arrLength + l + 1] = pos_col;
@@ -306,7 +311,7 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,
 	}
 
 	index = lwData[__float2int_rd(pos_row * LatSize + pos_col)];
-	printf("After getting the index (Inside After 24 hours function)\n");
+	//printf("After getting the index (Inside After 24 hours function)\n");
 
 	if (index != 1){
 		birdStatus[id] = 0;
@@ -381,8 +386,6 @@ __device__ float bilinear_interpolation_SmallData(float x,float y,float* data_ar
 	R1 = Q11 + (x - x1)*(Q21 - Q11);
 	R2 = Q12 + (x - x1)*(Q22 - Q12);
 	R = R1 + (y - y1)*(R2 - R1);
-	
-	//printf("Q11:%f,Q12:%f,Q21:%f,Q22:%f; And Value=%f\n",Q11,Q12,Q21,Q22,value);
 
 	return R;
 }
@@ -390,10 +393,11 @@ __device__ float bilinear_interpolation_SmallData(float x,float y,float* data_ar
 
 //###########################################################################################################################################//
 
-__device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,long l)
+__device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,long int l)
 {
 	float x1,y1,x2,y2;
 	float Q11,Q12,Q21,Q22,R1,R2,R;
+	
 
 	x1 = floorf(x);
 	x2 = ceilf(x);
@@ -401,6 +405,7 @@ __device__ float bilinear_interpolation_LargeData(float x,float y,float* data_ar
 	y2 = ceilf(y);
 	R = 0;
 	
+
 	Q11 = data_array[(int)(l  * LatSize * LongSize + y1 * LongSize + x1) ];
 	Q12 = data_array[(int)(l  * LatSize * LongSize + y2 * LongSize + x1) ];
 	Q21 = data_array[(int)(l  * LatSize * LongSize + y1 * LongSize + x2) ];
@@ -465,7 +470,6 @@ __global__ void generate_kernel(curandState *states,float* numbers,int NumOfBird
 //###########################################################################################################################################//
 //###########################################################################################################################################//
 //###########################################################################################################################################//
-
 __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int cur_l,float* udata,float* vdata,
 				float* u10data,float* v10data,float* dirData,float* rand_norm_nums,float* precipData,float* pressureData,
 				float* lwData,uint8_t* birdStatus,int* birdTimesteps)
@@ -474,12 +478,12 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 	//Thread indices
 	int id = blockIdx.x * blockDim.x + threadIdx.x; 
 
-	//if(id > (NumOfBirds -1)||(birdStatus[id]==0)||(cur_l > max_timesteps)){ 
+	if(id > (NumOfBirds -1)||(birdStatus[id]==0)){ 
 
 	//The condition cur_l > max_timesteps is OK now because all birds start at the same time
 	//NOT OK once birds start at different dates
 //	if((id > (NumOfBirds -1)) || (birdTimesteps[id] >= cur_l)){ 
-	if(id > (NumOfBirds -1)){
+//	if(id > (NumOfBirds -1)){
 		return;
 	}
 	
@@ -504,15 +508,15 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 	
 
 		slope = 0;
-		printf("Value of l is %ld\n",l);
+		//printf("Value of l is %ld\n",l);
 
-		printf("Array length per bird is %d\n",arrLength);
-		printf("id is %d\n",id);
+		//printf("Array length per bird is %d\n",arrLength);
+		//printf("id is %d\n",id);
 
-		printf("id * arrayLength is:%d\n",id*arrLength);
+		//printf("id * arrayLength is:%d\n",id*arrLength);
 	
-		printf("Starting pos_row is %f , pos_col is: %f\n",*(rowArray + id * arrLength + l -1),*(colArray + id * arrLength + l -1));
-		printf("Before any computation; Timestep #: %ld\n",l);
+		//printf("Starting pos_row is %f , pos_col is: %f\n",*(rowArray + id * arrLength + l -1),*(colArray + id * arrLength + l -1));
+		//printf("Before any computation; Timestep #: %ld\n",l);
 		pos_row = rowArray[id * arrLength + l - 1];
 		pos_col = colArray[id * arrLength + l - 1];
 	
@@ -545,7 +549,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			var_profit_10m = 1;
 		}else{
 			var_profit_10m = 0;
-			printf("Profit value at 10m is low \n");
+			//printf("Profit value at 10m is low \n");
 		}
 //--------------
 
@@ -584,7 +588,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			
 			if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
 				birdStatus[id] = 0;
-				printf("Dead bird \n");
+				//printf("Dead bird \n");
 			}
 			
 			var_product = birdStatus[id] * var_profit_10m * l_product;
@@ -592,8 +596,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			rowArray[id * arrLength + l] = pos_row + var_product * (v_val + vDir_value ) * 0.36 * -1;
 			colArray[id * arrLength + l] = pos_col + var_product * (u_val + uDir_value) * 0.36;
 					
-			printf("6 Hour Flight\tRow: %f,Col:%f\n",rowArray[id * arrLength + l],colArray[id * arrLength + l]);
-			printf("6 hour flight;Timestep #: %ld\n",l);
+			//printf("6 Hour Flight\tRow: %f,Col:%f\n",rowArray[id * arrLength + l],colArray[id * arrLength + l]);
+			//printf("6 hour flight;Timestep #: %ld\n",l);
 			
 			l = l + l_product;
 
@@ -601,7 +605,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		
 		//The value of l increases at the last iteration 
 
-		printf("After 6 hour flight over\n");
+		//printf("After 6 hour flight over\n");
 		pos_row = rowArray[id * arrLength + l - 1];
 		pos_col = colArray[id * arrLength + l - 1];
 		
@@ -609,10 +613,10 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		// If the bird is at sea after the first 6 hours of flight 
 		if( index == 1.0){
 			var_sea = 0;
-			printf("Not at sea after 6 hours \n");
+			//printf("Not at sea after 6 hours \n");
 		}else{
 			var_sea = 1;
-			printf("At sea after 6 hours \n");
+			//printf("At sea after 6 hours \n");
 		}
 
 		//Getting the wrapped angle; Same uDir_value and vDir_value used for the 4 hours
@@ -641,8 +645,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			pos_col = pos_col + var_product * (u_val + uDir_value) * 0.36;
 
 
-			printf("+4 Hour Flight\tRow: %f,Col:%f\n",pos_row,pos_col);
-			printf("+4 hour flight;Timestep #: %ld\n",l);
+			//printf("+4 Hour Flight\tRow: %f,Col:%f\n",pos_row,pos_col);
+			//printf("+4 hour flight;Timestep #: %ld\n",l);
 
 			if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
 				birdStatus[id] = 0;
@@ -663,38 +667,38 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 
 		if(index == 1){
 			var_10hrsSea = 0;
-			printf("Not at sea after 10 hours \n");
+			//printf("Not at sea after 10 hours \n");
 		}else{
 			var_10hrsSea = 1;
-			printf("At sea after 10 hours \n");
+			//printf("At sea after 10 hours \n");
 		}
 		
 //----------------------- If at sea even after the 10 hours but within 24 hours		
 		var_product = birdStatus[id] * var_profit_10m * var_sea * var_10hrsSea * l_product;
 		l = bird_AtSea_Within24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product);
 //------------------------						
-		printf("Before getting the index \n");
+		//printf("Before getting the index \n");
 		index = lwData[__float2int_rd(pos_row * LongSize + pos_col)];
 		if(index == 1.0){
 			var_10hrsSea = 0;
-			printf("Not at sea after 24 hours \n");
+			//printf("Not at sea after 24 hours \n");
 		}else{
 			var_10hrsSea = 1;
-			printf("At sea after 24 hours \n");
+			//printf("At sea after 24 hours \n");
 		}
-		printf("After getting the index \n");
+		//printf("After getting the index \n");
 //----------------------- If at sea even after the the 10 hours and beyond 24 hours 	
 
 		
 		var_product = birdStatus[id] * var_profit_10m * var_sea * var_10hrsSea * l_product;
 		if(var_product == 1){ 
-			printf("At sea after 24 hours \n");
+			//printf("At sea after 24 hours \n");
 		}
-		printf("After the variable product \n");
+		//printf("After the variable product \n");
 
-		printf("The current value of l is: %ld And of start_l is: %ld \n\n",l,start_l);
+		//printf("The current value of l is: %ld And of start_l is: %ld \n\n",l,start_l);
 		l = bird_AtSea_After24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product,l_product);
-		printf("After bird_AtSea_After24Hrs and before regression calculations \n");
+		//printf("After bird_AtSea_After24Hrs and before regression calculations \n");
 //------------------------	
 		birdTimesteps[id] = l;
 		l_old = l - RegressionHrs;
@@ -730,7 +734,7 @@ long Get_GPU_devices()
 	HANDLE_ERROR(cudaGetDeviceProperties(&prop,whichDevice));
 	
 	if(!prop.deviceOverlap){
-			printf("Device does not handle overlaps so streams are not possible\n");
+			//printf("Device does not handle overlaps so streams are not possible\n");
 	return 0;
 	}
 
@@ -738,9 +742,9 @@ long Get_GPU_devices()
 	
 	HANDLE_ERROR(cudaGetDeviceCount(&DeviceCount));
 	if(DeviceCount > 0){ 
-		printf("%d Devices Found\n",DeviceCount);
+		//printf("%d Devices Found\n",DeviceCount);
 	}else{
-		printf("No devices found or error in reading the number of devices\n");
+		//printf("No devices found or error in reading the number of devices\n");
 		return 0;
 	}
 	
@@ -748,10 +752,10 @@ long Get_GPU_devices()
 
 	cudaDeviceProp properties;
 	HANDLE_ERROR(cudaGetDeviceProperties(&properties,i));
-	printf("Device Number: %d\n", i);
-	printf("  Device name: %s\n", properties.name);
-	printf("  Device Global Memory size: %zd MB \n",properties.totalGlobalMem/1000000);
-	printf("\n");
+	//printf("Device Number: %d\n", i);
+	//printf("  Device name: %s\n", properties.name);
+	//printf("  Device Global Memory size: %zd MB \n",properties.totalGlobalMem/1000000);
+	//printf("\n");
 	
 	deviceMemory = properties.totalGlobalMem;
 
@@ -871,7 +875,7 @@ long int convert_to_month(int month,int day)
 		index = 93; //The data for october starts after 31+30+31 days of sept,aug and oct respectively.
 	}
 	else{
-		printf("\n\t\tIncorrect month used\n\t\tUse between August-November inclusive; Only use numbers ; August = 8\n");
+		//printf("\n\t\tIncorrect month used\n\t\tUse between August-November inclusive; Only use numbers ; August = 8\n");
 		return -1;
 	}
 
@@ -947,7 +951,7 @@ int main(int argc,char* argv[])
 	if(starting_row >= MAX_LAT_SOUTH){
 		printf("\t\tProvided starting row is below the southern most lattitude at which the model is set to stop\n");
 		printf("\t\tEither change the starting row location and/or MAX_LAT upto which the birds can fly\n");
-		return -1;
+		exit(-1);
 	}
 	
 //-----------------------------------------------Day-----------------------------------------//
@@ -957,7 +961,7 @@ int main(int argc,char* argv[])
 		sprintf(dayStr,"%d",day);
 	}else{
 		printf("\t\t Invalid date provided; Date should be greater than 0 and less than 32\n");
-		return -1;
+		exit(-1);
 	}
 
 //-----------------------------------------------Month-----------------------------------------//
@@ -967,7 +971,7 @@ int main(int argc,char* argv[])
 		sprintf(monthStr,"%d",month);
 	}else{
 		printf("\t\t Invalid month provided; Use between 8 and 11 inclusive\n");
-		return -1;
+		exit(-1);
 	}
 
 	/** Converting month and day information into number of timesteps; Special case of AUG 1st is also taken care of
@@ -989,7 +993,7 @@ int main(int argc,char* argv[])
 	else{
 		printf("\n\tInvalid year specified\n\tSpecified %d; Use years from 2008 to 2013 in its full format\n",year);
              	printf("\t\tUsage: birds -y Year -m Month(Number) -d DayOfTheMonth -r StartingRow -c StartingCol -N NumberOfBirds\n"); 
-		return -1;		
+		exit(-1);		
 	}
 
 	strcpy(start_date,yearStr);
@@ -1006,19 +1010,19 @@ int main(int argc,char* argv[])
 	rowdataTxt = fopen("row_output.txt","a");
 	if(rowdataTxt == NULL) {
 		perror("Cannot open output row data file\n");
-		return -1;
+		exit(-1);
 	}
 
 	coldataTxt = fopen("col_output.txt","a");
 	if(coldataTxt == NULL) {
 		perror("Cannot open output col data file\n");
-		return -1;
+		exit(-1);
 	}
 
 	birdStatusTxt = fopen("birdStatus_Final.txt","a");
 	if(birdStatusTxt == NULL) {
 		perror("Cannot open output birdStatus file\n");
-		return -1;
+		exit(-1);
 	}
 //----------------------Opening U850 data file----------------------------//
 	memset(fullFileName,0,strlen(fullFileName));
@@ -1030,7 +1034,7 @@ int main(int argc,char* argv[])
 
 	if(udataTxt == NULL) {
 		perror("Cannot open file with U850 data\n");
-		return -1;
+		exit(-1);
 	}
 //------------------------Opening V850 data file--------------------------//
 	memset(fullFileName,0,strlen(fullFileName));
@@ -1041,7 +1045,7 @@ int main(int argc,char* argv[])
 
 	if(vdataTxt == NULL) {
 		perror("Cannot open file with V850 data\n");
-		return -1;
+		exit(-1);
 	}
 //-----------------------Opening U10 data file---------------------------//
 	//Birds will check the wind at the surface therefore the u and v
@@ -1055,7 +1059,7 @@ int main(int argc,char* argv[])
 
 	if(u10dataTxt == NULL) {
 		perror("Cannot open file with U10 data\n");
-		return -1;
+		exit(-1);
 	}
 //-----------------------Opening V10 data file---------------------------//
 	memset(fullFileName,0,strlen(fullFileName));
@@ -1066,7 +1070,7 @@ int main(int argc,char* argv[])
 	
 	if(v10dataTxt == NULL) {
 		perror("Cannot open file with V10 data\n");
-		return -1;
+		exit(-1);
 	}
 //--------------------Opening PRCP data file------------------------------//
 	memset(fullFileName,0,strlen(fullFileName));
@@ -1076,7 +1080,7 @@ int main(int argc,char* argv[])
 	precipTxt = fopen(fullFileName,"r");
 	if(precipTxt == NULL) {
 		perror("Cannot open file with PRCP data\n");
-		return -1;
+		exit(-1);
 	}
 //------------------------Opening MSLP data file--------------------------//
 	memset(fullFileName,0,strlen(fullFileName));
@@ -1086,13 +1090,13 @@ int main(int argc,char* argv[])
 	pressureTxt = fopen(fullFileName,"r");
 	if(pressureTxt == NULL) {
 		perror("Cannot open file with pressure data!\n");
-		return -1;
+		exit(-1);
 	}
 //--------------------------Opening Land vs Water File---------------------//
 	lwTxt = fopen("./Lw_and_Dir/land_water_detail.txt","r");
 	if(lwTxt == NULL) {
 		perror("Cannot open file with direction data\n");
-		return -1;
+		exit(-1);
 	}
 //--------------------------Opening Direction file 
 //--------------------(Example: ext_crop.txt or extP_crop.txt)-------------//
@@ -1101,7 +1105,7 @@ int main(int argc,char* argv[])
 	//dirTxt = fopen("ext_crop.txt","r");
 	if(dirTxt == NULL) {
 		perror("Cannot open file with direction data\n");
-		return -1;
+		exit(-1);
 	}
 
 
@@ -1113,6 +1117,8 @@ int main(int argc,char* argv[])
 
 //	HANDLE_ERROR(cudaDeviceSetLimit(cudaLimitMallocHeapSize,(size_t)(6 * LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float))));
 //--------------------------Memory Allocation for global arrays containing weather data----------------------------//
+	HANDLE_ERROR(cudaDeviceReset());
+
 	float *h_row,*h_col;
 	float *d_row,*d_col;	
 	float *d_udata,*d_vdata,*d_u10data,*d_v10data,*d_lwData;
@@ -1141,18 +1147,18 @@ int main(int argc,char* argv[])
 
 //------------------------------------------------------------------------------------------------------------------//
 
-	HANDLE_ERROR(cudaMallocHost((void**)&udata,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&vdata,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&u10data,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));	
-	HANDLE_ERROR(cudaMallocHost((void**)&v10data,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&precipData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
-	HANDLE_ERROR(cudaMallocHost((void**)&pressureData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void **)&udata,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void **)&vdata,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void **)&u10data,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));	
+	HANDLE_ERROR(cudaMallocHost((void **)&v10data,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void **)&precipData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
+	HANDLE_ERROR(cudaMallocHost((void **)&pressureData,LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float)));
 
-	printf("Size of large arrays is %zd\n",sizeof(udata)/sizeof(udata[0]));
-	printf("Size of large arrays is %ld\n",sizeof(udata)/sizeof(float));
-	printf("Size of large arrays is %ld\n",sizeof(udata)/sizeof(float));
+	//printf("Size of large arrays is %zd\n",sizeof(udata)/sizeof(udata[0]));
+	//printf("Size of large arrays is %ld\n",sizeof(udata)/sizeof(float));
+	//printf("Size of large arrays is %ld\n",sizeof(udata)/sizeof(float));
 
-	int ii;
+	int ii,jj;
 	for(ii=0;ii<(NumOfBirds * (TIMESTEPS + 1));ii++){
 		*(h_row + ii) = starting_row;
 		*(h_col + ii) = starting_col;
@@ -1167,6 +1173,7 @@ int main(int argc,char* argv[])
 
 //--------------------------Initializing the structures-------------------------------------------------------------------//
 
+	
 	inpStruct[0].fp = vdataTxt;
 	inpStruct[0].inpVals = vdata;
 
@@ -1195,22 +1202,24 @@ int main(int argc,char* argv[])
 	/** Using pthreads to read from the files in parallel**/
 	pthread_t threads[8];
 
+
+	printf("Before pthreads creation \n");
 	int i;
 	for(i=0;i<8;i++){
 		if(pthread_create(&threads[i],NULL,read_dataFiles,(void*)&inpStruct[i]) != 0){
 			fprintf(stderr,"ERROR: Thread creation using pthreads failed\n");
-			return -1;
+			exit(-1);
 		}
 
 	}
-
+	printf("After pthreads creation and before join\n ");
 	for(i=0;i<8;i++){
 		if(pthread_join(threads[i],NULL)!=0){
  			fprintf(stderr,"ERROR: Thread join failed\n");
-                        return -1;
+                        exit(-1);
 		}
 	}
-
+	printf("After pthreads join\n ");
 
 	printf("End of parallel data read\n");
 	
@@ -1222,7 +1231,7 @@ int main(int argc,char* argv[])
 	/** Getting the total number of devices available **/
 	HANDLE_ERROR(cudaGetDeviceCount(&DeviceCount));
 	HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
-	HANDLE_ERROR(cudaDeviceReset());
+	
 
 	HANDLE_ERROR(cudaMalloc((void**)&states,NumOfBirds * (TIMESTEPS+1) * sizeof(curandState_t)));
 	HANDLE_ERROR(cudaMalloc((void**)&rand_norm_nums,NumOfBirds * (TIMESTEPS+1) * sizeof(float)));
@@ -1267,10 +1276,8 @@ int main(int argc,char* argv[])
 	HANDLE_ERROR(cudaMalloc((void**)&d_birdStatus,NumOfBirds * sizeof(uint8_t)));
 	HANDLE_ERROR(cudaMalloc((void**)&d_birdTimesteps,NumOfBirds * sizeof(int)));
 
-	cudaStream_t streams_posData[5];
-	for(i=0;i<4;i++){
-		HANDLE_ERROR(cudaStreamCreate(&streams_posData[i]));
-	}
+
+	printf("After cudaMalloc of non changing data\n");
 
 /*
 	HANDLE_ERROR(cudaMemcpyAsync(d_row,h_row,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyHostToDevice,streams_posData[0]));
@@ -1287,18 +1294,11 @@ int main(int argc,char* argv[])
 	HANDLE_ERROR(cudaMemcpy(d_birdStatus,h_birdStatus,NumOfBirds * sizeof(uint8_t),cudaMemcpyHostToDevice));
 	HANDLE_ERROR(cudaMemcpy(d_birdTimesteps,h_birdTimesteps,NumOfBirds * sizeof(int),cudaMemcpyHostToDevice));
 
-//---------------------------------------Destroying the Streams created----------------------------------------------------------//
-	HANDLE_ERROR(cudaDeviceSynchronize());
-
-	for(i=0;i<4;i++){
-		HANDLE_ERROR(cudaStreamSynchronize(streams_posData[i]));
-		HANDLE_ERROR(cudaStreamDestroy(streams_posData[i]));
-	}
-
+	printf("After cudaMemcpy of non changing data\n");
 //------------------------------------Getting the size of data needed per transfer---------------------------------------------//
 
-	int DaysPerTransfer = BIRD_HRS_LIMIT/24;
-	int TimestepsPerTransfer = DaysPerTransfer * TIMESTEPS_PER_DAY;
+	int DaysPerTransfer = BIRD_HRS_LIMIT/TIMESTEPS_PER_DAY;
+	int TimestepsPerTransfer = BIRD_HRS_LIMIT;
 	long int DataPerTransfer = TimestepsPerTransfer * LAT_SIZE * LONG_SIZE * sizeof(float);
 	
 	int DaysTransferrable = TOTAL_DAYS - 1 - (DaysPerTransfer - 1);
@@ -1307,46 +1307,270 @@ int main(int argc,char* argv[])
 	//Hardcoded because 119/7 = 17 exactly
 	const int total_streams = 7;
 
-
 	cudaStream_t streams[total_streams];
 
 	for(i = 0;i<total_streams;i++){
 		HANDLE_ERROR(cudaStreamCreate(&streams[i]));
 	}
-//-----------------------------------------------------------------------------------------------------------------------------//
-	long int start_timestep,cur_timestep,max_timesteps,ptrOffset;
-	ptrOffset = INITIAL_SKIP_TIMESTEPS * TIMESTEPS_PER_DAY * LAT_SIZE * LONG_SIZE;
 
+	printf("After streams creation for the changing data\n");
+//-----------------------------------------------------------------------------------------------------------------------------//
+	long int start_timestep,cur_timestep,max_timesteps,h_offset,d_offset;
+
+	h_offset = INITIAL_SKIP_TIMESTEPS * TIMESTEPS_PER_DAY * LAT_SIZE * LONG_SIZE;
+	d_offset = 0;
 	cur_timestep = offset_into_data;
+
 	HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
 
-	HANDLE_ERROR(cudaMalloc((void**)&d_udata,DataPerTransfer));	
-	HANDLE_ERROR(cudaMalloc((void**)&d_vdata,DataPerTransfer));	
-	HANDLE_ERROR(cudaMalloc((void**)&d_u10data,DataPerTransfer));	
-	HANDLE_ERROR(cudaMalloc((void**)&d_v10data,DataPerTransfer));	
-	HANDLE_ERROR(cudaMalloc((void**)&d_precipData,DataPerTransfer));	
-	HANDLE_ERROR(cudaMalloc((void**)&d_pressureData,DataPerTransfer));
+	printf("After selecting the correct device\n");
+	HANDLE_ERROR(cudaMalloc((void**)&d_udata,DataPerTransfer * 2));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_vdata,DataPerTransfer * 2));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_u10data,DataPerTransfer * 2));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_v10data,DataPerTransfer * 2));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_precipData,DataPerTransfer * 2));	
+	HANDLE_ERROR(cudaMalloc((void**)&d_pressureData,DataPerTransfer * 2));
 
+	printf("After cudaMalloc for the changing data\n");
+
+
+	int current_index, next_index;
+
+	//current_index = ((offset_into_data - INITIAL_SKIP_TIMESTEPS)/24) % total_streams;
+	ii = -1;
+	jj = 0;
+	current_index = 0;
 
 	//For the iteration time this is necessary
-	HANDLE_ERROR(cudaMemcpyAsync(d_udata, udata+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
-	HANDLE_ERROR(cudaMemcpyAsync(d_vdata, vdata+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
-	HANDLE_ERROR(cudaMemcpyAsync(d_u10data, u10data+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
-	HANDLE_ERROR(cudaMemcpyAsync(d_v10data, v10data+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
-	HANDLE_ERROR(cudaMemcpyAsync(d_precipData, precipData+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
-	HANDLE_ERROR(cudaMemcpyAsync(d_pressureData, pressureData+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[0]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_udata,udata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[current_index]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_vdata,vdata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[current_index]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_u10data,u10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[current_index]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_v10data,v10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[current_index]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_precipData,precipData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[current_index]));
+	HANDLE_ERROR(cudaMemcpyAsync(d_pressureData,pressureData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[current_index]));
 
 
+	//printf("After cudaMemcpyAsync for the changing data\n");
 
 	dim3 gridSize((NumOfBirds + 32 - 1)/32,1,1);
 	dim3 blockSize(32,1,1);
 
-	int current_index, next_index;
-
-
-	for(i=0;i<DaysTransferrable;i++){
+	for(i=0;i<DaysTransferrable;i=i+1){
 
 		HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
+
+		//All of these are inclusive
+		//If TimeStepsPerTransfer is 9, then they would be: 0-8, 9-17, 18-26,...
+		start_timestep = i * TIMESTEPS_PER_DAY + INITIAL_SKIP_TIMESTEPS;
+		max_timesteps = start_timestep + TimestepsPerTransfer;
+		cur_timestep = start_timestep;
+
+		//Has to change once the start dates for each bird changes
+		if(start_timestep >= offset_into_data){
+			ii = ii + 1;
+			jj = ii + 1;
+
+			current_index = ii % 7;
+			next_index = jj % 7;
+
+			bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,d_udata+d_offset,
+												d_vdata+d_offset,d_u10data+d_offset,d_v10data+d_offset,d_dirData,
+												rand_norm_nums,d_precipData+d_offset,
+												d_pressureData+d_offset,d_lwData,d_birdStatus,d_birdTimesteps);
+
+			d_offset = DataPerTransfer/sizeof(float) *(ii % 2);
+
+			HANDLE_ERROR(cudaMemcpyAsync(d_udata + d_offset,udata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_vdata + d_offset,vdata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_u10data + d_offset,u10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_v10data + d_offset,v10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_precipData + d_offset,precipData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_pressureData + d_offset,pressureData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+
+
+		 	HANDLE_ERROR(cudaStreamSynchronize(streams[next_index]));
+			HANDLE_ERROR(cudaStreamSynchronize(streams[current_index]));
+			//-------------------------------------------------------------------------------------------------------------------------------------------//
+			i = i + 1;
+			ii = ii + 1;
+			jj = ii + 1;
+
+			current_index = ii % 7;
+			next_index = jj % 7;
+			start_timestep = i * TIMESTEPS_PER_DAY + INITIAL_SKIP_TIMESTEPS;
+			max_timesteps = start_timestep + TimestepsPerTransfer;
+			cur_timestep = start_timestep;
+
+			bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,d_udata+d_offset,
+												d_vdata+d_offset,d_u10data+d_offset,d_v10data+d_offset,d_dirData,
+												rand_norm_nums,d_precipData+d_offset,
+												d_pressureData+d_offset,d_lwData,d_birdStatus,d_birdTimesteps);
+
+			d_offset = DataPerTransfer/sizeof(float) *(ii % 2);
+
+			HANDLE_ERROR(cudaMemcpyAsync(d_udata + d_offset,udata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_vdata + d_offset,vdata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_u10data + d_offset,u10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_v10data + d_offset,v10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_precipData + d_offset,precipData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_pressureData + d_offset,pressureData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+
+
+		 	HANDLE_ERROR(cudaStreamSynchronize(streams[next_index]));
+			HANDLE_ERROR(cudaStreamSynchronize(streams[current_index]));
+			//-------------------------------------------------------------------------------------------------------------------------------------------//
+			i = i + 1;
+			ii = ii + 1;
+			jj = ii + 1;
+
+			current_index = ii % 7;
+			next_index = jj % 7;
+			start_timestep = i * TIMESTEPS_PER_DAY + INITIAL_SKIP_TIMESTEPS;
+			max_timesteps = start_timestep + TimestepsPerTransfer;
+			cur_timestep = start_timestep;
+
+			bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,d_udata+d_offset,
+												d_vdata+d_offset,d_u10data+d_offset,d_v10data+d_offset,d_dirData,
+												rand_norm_nums,d_precipData+d_offset,
+												d_pressureData+d_offset,d_lwData,d_birdStatus,d_birdTimesteps);
+
+			d_offset = DataPerTransfer/sizeof(float) *(ii % 2);
+
+			HANDLE_ERROR(cudaMemcpyAsync(d_udata + d_offset,udata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_vdata + d_offset,vdata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_u10data + d_offset,u10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_v10data + d_offset,v10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_precipData + d_offset,precipData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_pressureData + d_offset,pressureData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+
+
+		 	HANDLE_ERROR(cudaStreamSynchronize(streams[next_index]));
+			HANDLE_ERROR(cudaStreamSynchronize(streams[current_index]));
+			//-------------------------------------------------------------------------------------------------------------------------------------------//
+			i = i + 1;
+			ii = ii + 1;
+			jj = ii + 1;
+
+			current_index = ii % 7;
+			next_index = jj % 7;
+			start_timestep = i * TIMESTEPS_PER_DAY + INITIAL_SKIP_TIMESTEPS;
+			max_timesteps = start_timestep + TimestepsPerTransfer;
+			cur_timestep = start_timestep;
+
+			bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,d_udata+d_offset,
+												d_vdata+d_offset,d_u10data+d_offset,d_v10data+d_offset,d_dirData,
+												rand_norm_nums,d_precipData+d_offset,
+												d_pressureData+d_offset,d_lwData,d_birdStatus,d_birdTimesteps);
+
+			d_offset = DataPerTransfer/sizeof(float) *(ii % 2);
+
+			HANDLE_ERROR(cudaMemcpyAsync(d_udata + d_offset,udata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_vdata + d_offset,vdata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_u10data + d_offset,u10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_v10data + d_offset,v10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_precipData + d_offset,precipData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_pressureData + d_offset,pressureData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+
+
+		 	HANDLE_ERROR(cudaStreamSynchronize(streams[next_index]));
+			HANDLE_ERROR(cudaStreamSynchronize(streams[current_index]));
+			//-------------------------------------------------------------------------------------------------------------------------------------------//	
+			i = i + 1;
+
+			ii = ii + 1;
+			jj = ii + 1;
+
+			current_index = ii % 7;
+			next_index = jj % 7;
+			start_timestep = i * TIMESTEPS_PER_DAY + INITIAL_SKIP_TIMESTEPS;
+			max_timesteps = start_timestep + TimestepsPerTransfer;
+			cur_timestep = start_timestep;
+
+			bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,d_udata+d_offset,
+												d_vdata+d_offset,d_u10data+d_offset,d_v10data+d_offset,d_dirData,
+												rand_norm_nums,d_precipData+d_offset,
+												d_pressureData+d_offset,d_lwData,d_birdStatus,d_birdTimesteps);
+
+			d_offset = DataPerTransfer/sizeof(float) *(ii % 2);
+
+			HANDLE_ERROR(cudaMemcpyAsync(d_udata + d_offset,udata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_vdata + d_offset,vdata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_u10data + d_offset,u10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_v10data + d_offset,v10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_precipData + d_offset,precipData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_pressureData + d_offset,pressureData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+
+
+		 	HANDLE_ERROR(cudaStreamSynchronize(streams[next_index]));
+			HANDLE_ERROR(cudaStreamSynchronize(streams[current_index]));
+			//-------------------------------------------------------------------------------------------------------------------------------------------//	
+			i = i + 1;
+
+			ii = ii + 1;
+			jj = ii + 1;
+
+			current_index = ii % 7;
+			next_index = jj % 7;
+			start_timestep = i * TIMESTEPS_PER_DAY + INITIAL_SKIP_TIMESTEPS;
+			max_timesteps = start_timestep + TimestepsPerTransfer;
+			cur_timestep = start_timestep;
+
+			bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,d_udata+d_offset,
+												d_vdata+d_offset,d_u10data+d_offset,d_v10data+d_offset,d_dirData,
+												rand_norm_nums,d_precipData+d_offset,
+												d_pressureData+d_offset,d_lwData,d_birdStatus,d_birdTimesteps);
+
+			d_offset = DataPerTransfer/sizeof(float) *(ii % 2);
+
+			HANDLE_ERROR(cudaMemcpyAsync(d_udata + d_offset,udata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_vdata + d_offset,vdata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_u10data + d_offset,u10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_v10data + d_offset,v10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_precipData + d_offset,precipData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_pressureData + d_offset,pressureData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+
+
+		 	HANDLE_ERROR(cudaStreamSynchronize(streams[next_index]));
+			HANDLE_ERROR(cudaStreamSynchronize(streams[current_index]));
+			//-------------------------------------------------------------------------------------------------------------------------------------------//			
+			i = i + 1;
+			ii = ii + 1;
+			jj = ii + 1;
+
+			current_index = ii % 7;
+			next_index = jj % 7;
+			start_timestep = i * TIMESTEPS_PER_DAY + INITIAL_SKIP_TIMESTEPS;
+			max_timesteps = start_timestep + TimestepsPerTransfer;
+			cur_timestep = start_timestep;
+
+			bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,d_udata+d_offset,
+												d_vdata+d_offset,d_u10data+d_offset,d_v10data+d_offset,d_dirData,
+												rand_norm_nums,d_precipData+d_offset,
+												d_pressureData+d_offset,d_lwData,d_birdStatus,d_birdTimesteps);
+
+			d_offset = DataPerTransfer/sizeof(float) *(ii % 2);
+
+			HANDLE_ERROR(cudaMemcpyAsync(d_udata + d_offset,udata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_vdata + d_offset,vdata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_u10data + d_offset,u10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_v10data + d_offset,v10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_precipData + d_offset,precipData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_pressureData + d_offset,pressureData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+
+
+		 	HANDLE_ERROR(cudaStreamSynchronize(streams[next_index]));
+			HANDLE_ERROR(cudaStreamSynchronize(streams[current_index]));
+			//-------------------------------------------------------------------------------------------------------------------------------------------//
+	
+		}
+	}
+
+	
+
+/*
+	for(i=0;i<DaysTransferrable;i++){
+
+		//HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
 
 		
 		//All of these are inclusive
@@ -1354,165 +1578,55 @@ int main(int argc,char* argv[])
 		start_timestep = i * TIMESTEPS_PER_DAY + INITIAL_SKIP_TIMESTEPS;
 		max_timesteps = start_timestep + TimestepsPerTransfer;
 		
-
+		//Has to change once the start dates for each bird changes
 		if(start_timestep >= offset_into_data){
-	/*
-			if((max_timesteps - offset_into_data) > TimestepsPerTransfer){
-				cur_timestep = start_timestep;
-			}else{
-				cur_timestep = offset_into_data;
-			}
-	*/
+	
 			cur_timestep = start_timestep;
-			printf("Current timestep variable is:%ld\n",cur_timestep);
-			printf("Start timestep variable is:%ld\n",start_timestep);
-			printf("Max timestep is: %ld\n",max_timesteps);
-			printf("Offset into data is:%ld\n\n",offset_into_data);
+			//printf("Current timestep variable is:%ld\n",cur_timestep);
+			//printf("Start timestep variable is:%ld\n",start_timestep);
+			//printf("Max timestep is: %ld\n",max_timesteps);
+			//printf("Offset into data is:%ld\n\n",offset_into_data);
 
-			printf("Current timestep variable after checking if offset less than max_timesteps is:%ld\n",cur_timestep);
+			//printf("Current timestep variable after checking if offset less than max_timesteps is:%ld\n",cur_timestep);
 
 			current_index = i % total_streams;
 			next_index = (i+1) % total_streams;
 
-			printf("Current Index: %d , Next Index: %d\n",current_index,next_index);
+			//printf("Current Index: %d , Next Index: %d\n",current_index,next_index);
 
 			//-----------------------------------------Calling the Kernel-----------------------------------------------------------//
-			bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,d_udata,d_vdata,
-							d_u10data,d_v10data,d_dirData,rand_norm_nums,d_precipData,d_pressureData,d_lwData,d_birdStatus,d_birdTimesteps);
+			bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,d_udata+d_offset,
+											d_vdata+d_offset,d_u10data+d_offset,d_v10data+d_offset,d_dirData,
+											rand_norm_nums,d_precipData+d_offset,
+											d_pressureData+d_offset,d_lwData,d_birdStatus,d_birdTimesteps);
+
+			d_offset = DataPerTransfer/sizeof(float) *((i+1) % 2);
+
+			HANDLE_ERROR(cudaMemcpyAsync(d_udata + d_offset,udata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_vdata + d_offset,vdata+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_u10data + d_offset,u10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_v10data + d_offset,v10data+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_precipData + d_offset,precipData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+			HANDLE_ERROR(cudaMemcpyAsync(d_pressureData + d_offset,pressureData+h_offset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
 
 
-			HANDLE_ERROR(cudaMemcpyAsync(d_udata,udata+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
-			HANDLE_ERROR(cudaMemcpyAsync(d_vdata,vdata+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
-			HANDLE_ERROR(cudaMemcpyAsync(d_u10data,u10data+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
-			HANDLE_ERROR(cudaMemcpyAsync(d_v10data,v10data+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
-			HANDLE_ERROR(cudaMemcpyAsync(d_precipData,precipData+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
-			HANDLE_ERROR(cudaMemcpyAsync(d_pressureData,pressureData+ptrOffset,DataPerTransfer,cudaMemcpyHostToDevice,streams[next_index]));
+		 	HANDLE_ERROR(cudaStreamSynchronize(streams[next_index]));
+			HANDLE_ERROR(cudaStreamSynchronize(streams[current_index]));
+			//HANDLE_ERROR(cudaDeviceSynchronize());
 
+			
 
-	//	 	HANDLE_ERROR(cudaStreamSynchronize(streams[next_index]));
-	//		HANDLE_ERROR(cudaStreamSynchronize(streams[current_index]));
-			HANDLE_ERROR(cudaDeviceSynchronize());
+			
 		}	
-		ptrOffset = (TIMESTEPS_PER_DAY * LAT_SIZE * LONG_SIZE) * (i + 1) + INITIAL_SKIP_TIMESTEPS;
+		h_offset = (TIMESTEPS_PER_DAY * LAT_SIZE * LONG_SIZE) * (i + 1) + INITIAL_SKIP_TIMESTEPS;
 		
 	}
-
-
-/*
-	HANDLE_ERROR(cudaMemcpy(h_row,d_row,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyDeviceToHost));
-	HANDLE_ERROR(cudaMemcpy(h_col,d_col,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyDeviceToHost));
-	
-
-	for(i = 0;i < NumOfBirds * (TIMESTEPS + 1); i++ ){
-		printf("%f ",h_row[i]);	
-		if(i == TIMESTEPS){
-			printf("%f \n",h_row[i]);
-		}
-
-	}
-
-
-	printf("\n\n");
-	for(i = 0;i < NumOfBirds * (TIMESTEPS + 1); i++ ){
-		printf("%f ",h_col[i]);	
-		if(i == TIMESTEPS){
-			printf("%f \n",h_col[i]);
-		}
-
-	}
 */
-//-----------------------------------------------------------------------------------------------------------//
-//----------------------------------------------------Last Iteration-----------------------------------------//
-//-----------------------------------------------------------------------------------------------------------//
-/*
-	// Last iteration where the size might not be the same as others 
-	long int DataRemaining;
-	DataRemaining = (LONG_SIZE * LAT_SIZE * TIMESTEPS * sizeof(float)) - (DataPerTransfer * (TotalTransfers-1));
 
-	start_timestep = (TotalTransfers - 1) * TimestepsPerTransfer + INITIAL_SKIP_TIMESTEPS;
-	max_timesteps = TIMESTEPS;
-	ptrOffset = (DataPerTransfer/sizeof(float)) * (TotalTransfers - 1) + INITIAL_SKIP_TIMESTEPS;
-	
-	dim3 gridSize((NumOfBirds + 32 - 1)/32,1,1);
-	dim3 blockSize(32,1,1); 
-//----------------------------------------------------------------------------------------//
-
-	HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
-	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-	printf("Total mem: %zd,Free mem(Before any allocation): %zd\n",TotalMemory,MemoryRemaining);
-	
-	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-	printf("Total mem: %zd,Free mem(After SetDevice): %zd\n",TotalMemory,MemoryRemaining);
-
-	//HANDLE_ERROR(cudaStreamCreate(&stream[i]));
-	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-	printf("Total mem: %zd,Free mem(After Stream Create): %zd\n",TotalMemory,MemoryRemaining);
-
-	HANDLE_ERROR(cudaMalloc((void**)&d_udata,DataRemaining));	
-	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-	printf("Total mem: %zd,Free mem(After udata allocation): %zd\n",TotalMemory,MemoryRemaining);
-
-	HANDLE_ERROR(cudaMalloc((void**)&d_vdata,DataRemaining));	
-	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-	printf("Total mem: %zd,Free mem(After vdata allocation): %zd\n",TotalMemory,MemoryRemaining);
-
-	HANDLE_ERROR(cudaMalloc((void**)&d_u10data,DataRemaining));	
-	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-	printf("Total mem: %zd,Free mem(After u10data allocation): %zd\n",TotalMemory,MemoryRemaining);
-
-	HANDLE_ERROR(cudaMalloc((void**)&d_v10data,DataRemaining));	
-	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-	printf("Total mem: %zd,Free mem(After v10data allocation): %zd\n",TotalMemory,MemoryRemaining);
-
-	HANDLE_ERROR(cudaMalloc((void**)&d_precipData,DataRemaining));	
-	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-	printf("Total mem: %zd,Free mem(After precipData allocation): %zd\n",TotalMemory,MemoryRemaining);
-
-	HANDLE_ERROR(cudaMalloc((void**)&d_pressureData,DataRemaining));	
-	HANDLE_ERROR(cudaMemGetInfo(&MemoryRemaining,&TotalMemory));
-	printf("Total mem: %zd,Free mem(After pressureData allocation): %zd\n",TotalMemory,MemoryRemaining);
-
-
-
-	HANDLE_ERROR(cudaDeviceSynchronize());
-
-
-	printf("After all the host allocations %d\n",i);
-
-
-//-----------------------------------------Copying data from CPU to GPU----------------------------------------//
-
-	HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));	
-
-	HANDLE_ERROR(cudaMemcpy(d_udata,udata+ptrOffset,DataRemaining,cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_vdata,vdata+ptrOffset,DataRemaining,cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_u10data,u10data+ptrOffset,DataRemaining,cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_v10data,v10data+ptrOffset,DataRemaining,cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_precipData,precipData+ptrOffset,DataRemaining,cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_pressureData,pressureData+ptrOffset,DataRemaining,cudaMemcpyHostToDevice));
-	HANDLE_ERROR(cudaMemcpy(d_birdStatus,h_birdStatus,NumOfBirds * sizeof(uint8_t),cudaMemcpyHostToDevice));
-
-//-----------------------------------------Calling the Kernel-------------------------------------------------//
-
-
-	if((max_timesteps - offset_into_data) > TimestepsLastTransfer){
-		cur_timestep = start_timestep;
-	}else{
-		cur_timestep = offset_into_data;
-	}
-
-
-
-	printf("Before calling the kernel\n");
-	bird_movement<<<gridSize,blockSize>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,max_timesteps,d_udata,d_vdata,
-						d_u10data,d_v10data,d_dirData,rand_norm_nums,d_precipData,d_pressureData,d_lwData,d_birdStatus);
-
-	HANDLE_ERROR(cudaDeviceSynchronize());
 
 	HANDLE_ERROR(cudaMemcpy(h_row,d_row,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyDeviceToHost));
 	HANDLE_ERROR(cudaMemcpy(h_col,d_col,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyDeviceToHost));
-	HANDLE_ERROR(cudaMemcpy(h_birdStatus,d_birdStatus,NumOfBirds * sizeof(uint8_t),cudaMemcpyDeviceToHost));
-
+	
 	for(i = 0;i < NumOfBirds * (TIMESTEPS + 1); i++ ){
 		fprintf(rowdataTxt,"%f ",h_row[i]);	
 		if(((i+1) % (TIMESTEPS + 1)) == 0){
@@ -1529,11 +1643,6 @@ int main(int argc,char* argv[])
 
 	}
 
-	for(i = 0;i < NumOfBirds; i++ ){
-		fprintf(birdStatusTxt,"%d\n",h_birdStatus[i]);
-	}
-	//Get birdStatus array back as well
-*/
 //-----------------------------------------------Freeing allocated memory--------------------------------------//
 	for(i = 0;i<total_streams;i++){
 		HANDLE_ERROR(cudaStreamDestroy(streams[i]));
@@ -1583,7 +1692,9 @@ int main(int argc,char* argv[])
 	fclose(rowdataTxt);
 	fclose(coldataTxt);
 	
-	printf("End\n");
+	//printf("End\n");
+	HANDLE_ERROR(cudaDeviceReset());
+	exit(0);
 	return 0;
 }
 
