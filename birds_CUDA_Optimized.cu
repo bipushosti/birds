@@ -114,19 +114,19 @@ Precipitation = millimeters
 
 //--------------------------------------------------------------------------------------------------------------------------
 __global__ void setup_kernel(unsigned int seed,curandState *states,int NumOfBirds);
-__global__ void generate_kernel(curandState *states,float* numbers,int NumOfBirds);
-__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int cur_l,float* udata,float* vdata,float* u10data,
-				float* v10data,float* d_dirData,float* rand_norm_nums,float* precipData,float* pressureData,float* lwData,uint8_t* birdStatus,int* birdTimesteps);
-
+__global__ void generate_kernel(curandState *states,float* numbers,int NumOfBirds);				
+__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int cur_l,long int max_timesteps,float* udata,float* vdata,
+				float* u10data,float* v10data,float* dirData,float* precipData,float* pressureData,
+				float* lwData,uint8_t* birdStatus,int* birdTimesteps);
+				
 __device__ float bilinear_interpolation_SmallData(float x,float y,float* data_array);
 __device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,long l);
 __device__ float WrappedNormal(int id,float MeanAngle,float AngStdDev,float* rand_norm_nums,long int cur_timestep);
 __device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v);
 __device__ long int bird_AtSea_Within24Hrs(int id,int arrLength,float* rowArray,float* colArray,long int start_l,
 					long int l,float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,uint8_t l_product);
-__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int cur_l,long int max_timesteps,float* udata,float* vdata,
-				float* u10data,float* v10data,float* dirData,float* rand_norm_nums,float* precipData,float* pressureData,
-				float* lwData,uint8_t* birdStatus,int* birdTimesteps);
+					
+__device__ float randNorm(int id, long int timestep, float mean, float stdev);
 
 static void* write_dataVars(void* arguments);
 static void* read_dataFiles(void* arguments);
@@ -175,8 +175,45 @@ __device__ __constant__ int DenomSlope = DENOM_SLOPE;
 __device__ __constant__ int HrsSum = HRS_SUM;
 __device__ __constant__ int RegressionHrs = REGRESSION_HRS;
 __device__ __constant__ float GlCompAcc = glCompAcc;
+__device__ __constant__ float Rand_Precision = 1000;
 
 __device__ int CurrentTimestep = 0;
+
+//###########################################################################################################################################//
+
+//Getting a random normal number from Dr. David Heibler
+//u1 and u2, two random numbers created using Linear Congruential Generator
+//The period maximized by using Hull-Dobell Theorem (http://chagall.med.cornell.edu/BioinfoCourse/PDFs/Lecture4/random_number_generator.pdf)
+
+//Using the theorem to get u1: a1 = 1791, m1 = 2864 and c1 = 5827. (c1 is prime therefore c1 is relatively prime with any other number; Choosing m1=2864
+//	so that the prime factors are 2 and 179; Now, a1 = 179*10 + 1 as a1-1 has to be divisible by prime factors of m1)
+//Using the theorem to get u2: a2 = 931, m2 = 5382 and c2 = 9461. (31, 2 and 3 are prime factors of 5382, therefore a2 = 931)
+__device__ float randNorm(int id, long int timestep, float mean, float stdev)
+{
+    int tmp, seed, a1, m1, c1, a2, m2, c2;
+	float x, u1, u2;
+	
+	seed = (id+1)*(int)timestep;
+	a1 = 1791;
+	m1 = 2864;
+	c1 = 5827;
+	
+	a2 = 931;
+	m2 = 5382;
+	c2 = 9461;
+	
+	tmp = (a1 * seed + c1) % m1;
+	u1 = (float)tmp/(float)m1;
+	
+	tmp = (a2 * seed + c2) % m2;
+	u2 = (float)tmp/(float)m2;
+	
+    x = sqrt(-2.0*logf(u1)) * cosf(2*pi*u2);
+    x = x*stdev + mean;
+	
+	
+    return x;
+}
 //###########################################################################################################################################//
 
 __device__ long int bird_AtSea_Within24Hrs(int id,int arrLength,float* rowArray,float* colArray,long int start_l,long int l,
@@ -422,8 +459,10 @@ __device__ float bilinear_interpolation_LargeData(float x,float y,float* data_ar
 
 	return R;
 }
-//###########################################################################################################################################//
 
+
+//###########################################################################################################################################//
+/*
 __global__ void setup_kernel(unsigned int seed,curandState *states,int NumOfBirds)
 {
 
@@ -469,12 +508,12 @@ __global__ void generate_kernel(curandState *states,float* numbers,int NumOfBird
 	
 	return;
 }
-
+*/
 //###########################################################################################################################################//
 //###########################################################################################################################################//
 //###########################################################################################################################################//
 __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int cur_l,long int max_timesteps,float* udata,float* vdata,
-				float* u10data,float* v10data,float* dirData,float* rand_norm_nums,float* precipData,float* pressureData,
+				float* u10data,float* v10data,float* dirData,float* precipData,float* pressureData,
 				float* lwData,uint8_t* birdStatus,int* birdTimesteps)
 {
 
@@ -504,7 +543,6 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		float pos_row,pos_col;
 		int arrLength,days;
 
-
 		//--------------Checking if timestep is larger than the current timestep
 		//Should be changed from cur_l to max_timesteps
 		if(birdTimesteps[id] > cur_l){
@@ -533,7 +571,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		//printf("Before any computation; Timestep #: %ld\n",l);
 
 
-		while((l < max_timesteps) && (days<6)){
+		while((l < max_timesteps) && (days<5)){
 
 			pos_row = rowArray[id * arrLength + l - 1];
 			pos_col = colArray[id * arrLength + l - 1];
@@ -544,7 +582,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 
 			//--------------Getting the wrapped angle
 			actualAngle = dirData[__float2int_rd(pos_row * LatSize + pos_col)];
-			wrappedAngle = rand_norm_nums[id*TotalTimesteps + l] * STD_BIRDANGLE + actualAngle;
+			wrappedAngle = randNorm(id,l, actualAngle, STD_BIRDANGLE);
 
 			if(wrappedAngle > 360){
 				wrappedAngle = wrappedAngle - 360;
@@ -580,7 +618,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		
 				//Getting the wrapped angle
 				actualAngle = dirData[__float2int_rd(pos_row * LatSize + pos_col)];
-				wrappedAngle = rand_norm_nums[id*TotalTimesteps + l] * STD_BIRDANGLE + actualAngle;
+				wrappedAngle = randNorm(id,l, actualAngle, STD_BIRDANGLE);
 
 				if(wrappedAngle > 360){
 					wrappedAngle = wrappedAngle - 360;
@@ -635,7 +673,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 
 			//Getting the wrapped angle; Same uDir_value and vDir_value used for the 4 hours
 			actualAngle = dirData[__float2int_rd(pos_row * LatSize + pos_col)];
-			wrappedAngle = rand_norm_nums[id*TotalTimesteps + l] * STD_BIRDANGLE + actualAngle;
+			wrappedAngle = randNorm(id,l, actualAngle, STD_BIRDANGLE);
 			if(wrappedAngle > 360){
 				wrappedAngle = wrappedAngle - 360;
 			
@@ -713,7 +751,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			//printf("The current value of l is: %ld And of start_l is: %ld \n\n",l,start_l);
 			l = bird_AtSea_After24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product,l_product);
 			
-			days = days + (l - start_l)/TIMESTEPS_PER_DAY;
+			days = (l - start_l)/TIMESTEPS_PER_DAY;
+			printf("Days: %d\n",days);
 			//printf("After bird_AtSea_After24Hrs and before regression calculations \n");
 	//------------------------	
 			birdTimesteps[id] = l;
@@ -1154,14 +1193,6 @@ int main(int argc,char* argv[])
 	h_birdStatus = (uint8_t*)malloc(NumOfBirds * sizeof(uint8_t));
 	h_birdTimesteps = (int*)malloc(NumOfBirds * sizeof(int));
 	lwData = (float*) malloc(LAT_SIZE * LONG_SIZE * sizeof(float));	
-/*
-	udata = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
-	vdata = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
-	u10data = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
-	v10data = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
-	precipData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
-	pressureData = (float*)malloc(LAT_SIZE * LONG_SIZE * TIMESTEPS * sizeof(float));
-*/	
 
 //------------------------------------------------------------------------------------------------------------------//
 
@@ -1241,50 +1272,12 @@ int main(int argc,char* argv[])
 
 	printf("End of parallel data read\n");
 	
-//-----------------------------------Getting Random Values-------------------------------------------//
-	int DeviceCount;
-	float *rand_norm_nums;
-	curandState_t* states;
 
+	int DeviceCount;
 	/** Getting the total number of devices available **/
 	HANDLE_ERROR(cudaGetDeviceCount(&DeviceCount));
 	HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
 	
-
-	HANDLE_ERROR(cudaMalloc((void**)&states,NumOfBirds * (TIMESTEPS+1) * sizeof(curandState_t)));
-	HANDLE_ERROR(cudaMalloc((void**)&rand_norm_nums,NumOfBirds * (TIMESTEPS+1) * sizeof(float)));
-
-	//Making each block have total threads of 32
-	//GridSize setup such that total y grid is of size NumOfBirds and x grid is of size TIMESTEPS
-	dim3 blockSize1(32,1,1); 
-	dim3 gridSize1(((TIMESTEPS) + 31)/32,NumOfBirds,1);
-	
-	setup_kernel<<<gridSize1,blockSize1>>>(time(NULL),states,NumOfBirds);
-	HANDLE_ERROR(cudaDeviceSynchronize());
-	generate_kernel<<<gridSize1,blockSize1>>>(states,rand_norm_nums,NumOfBirds);
-	HANDLE_ERROR(cudaDeviceSynchronize());
-
-	/* print them out */
-/*	for ( j = 0; j < LAT_SIZE; j++) {
-		for( i = 0;i<LONG_SIZE;i++){
-			//printf("%f ", cpu_nums[j*LONG_SIZE + i]);
-			if(i == LONG_SIZE -1) {
-				printf("%f\n",dir_u[j * LAT_SIZE + i]);
-			}
-			else {
-				printf("%f ",dir_u[j * LAT_SIZE + i]);
-			}
-		}
-//		printf("\n");
-	}
-*/
-
-	HANDLE_ERROR(cudaDeviceSynchronize());
-
-	// free the memory we allocated for the states 
-	HANDLE_ERROR(cudaFree(states));
-
-	printf("Random number generator is working\n");
 
 //-------------------------------------------------------------------------------------------------------------------------//	
 	HANDLE_ERROR(cudaMalloc((void**)&d_row,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float)));	
@@ -1326,17 +1319,6 @@ int main(int argc,char* argv[])
 	int DaysTransferrable = ((TOTAL_DAYS - 1 - MaxFlightDays + 1)/TOTAL_DAYS_PER_DATA_TRANSFER) * TOTAL_DAYS_PER_DATA_TRANSFER;
 	int DaysRemaining_Transferrable = (TOTAL_DAYS - MaxFlightDays) - DaysTransferrable ;
 
-
-	//Hardcoded for Kepler architecture
-	const int total_streams = 32;
-
-	cudaStream_t streams[total_streams];
-
-	for(i = 0;i<total_streams;i++){
-		HANDLE_ERROR(cudaStreamCreate(&streams[i]));
-	}
-
-	printf("After streams creation for the changing data\n");
 //-----------------------------------------------------------------------------------------------------------------------------//
 	long int start_timestep,cur_timestep,max_timesteps,h_offset,d_offset,h_offsetStart,d_offsetStart;
 
@@ -1355,7 +1337,7 @@ int main(int argc,char* argv[])
 	HANDLE_ERROR(cudaMalloc((void**)&d_pressureData,TotalDataPerIteration));
 
 	printf("After cudaMalloc for the changing data\n");
-
+	HANDLE_ERROR(cudaDeviceSynchronize());
 
 	int current_index, next_index;
 
@@ -1370,6 +1352,20 @@ int main(int argc,char* argv[])
 	dim3 blockSize(32,1,1);
 
 	int zz = 0;
+
+//-----------------------------------Creating streams-------------------------------------------//
+	//Hardcoded for Kepler architecture
+	const int total_streams = 32;
+
+	cudaStream_t streams[total_streams];
+
+	for(i = 0;i<total_streams;i++){
+		HANDLE_ERROR(cudaStreamCreate(&streams[i]));
+	}
+
+	printf("After streams creation for the changing data\n");
+
+
 	for(i=0;i<DaysTransferrable;i=i+1){
 
 		//HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
@@ -1455,7 +1451,7 @@ int main(int argc,char* argv[])
 			
 			
 			bird_movement<<<gridSize,blockSize,0,streams[30]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,max_timesteps,
-			d_udata,d_vdata,d_u10data,d_v10data,d_dirData,rand_norm_nums,d_precipData,d_pressureData,d_lwData,d_birdStatus,d_birdTimesteps);
+			d_udata,d_vdata,d_u10data,d_v10data,d_dirData,d_precipData,d_pressureData,d_lwData,d_birdStatus,d_birdTimesteps);
 
 			zz++;
 			printf("Kernel call# %d\n",zz);
@@ -1469,62 +1465,6 @@ int main(int argc,char* argv[])
 
 	
 	printf("Number of days: %d\n",i);
-/*
-	for(i=0;i<DaysTransferrable;i++){
-
-		//HANDLE_ERROR(cudaSetDevice(DeviceCount - 1));
-
-		
-		//All of these are inclusive
-		//If TimeStepsPerTransfer is 9, then they would be: 0-8, 9-17, 18-26,...
-		start_timestep = i * TIMESTEPS_PER_DAY + INITIAL_SKIP_TIMESTEPS;
-		max_timesteps = start_timestep + TimestepsPerTransfer;
-		
-		//Has to change once the start dates for each bird changes
-		if(start_timestep >= offset_into_data){
-	
-			cur_timestep = start_timestep;
-			//printf("Current timestep variable is:%ld\n",cur_timestep);
-			//printf("Start timestep variable is:%ld\n",start_timestep);
-			//printf("Max timestep is: %ld\n",max_timesteps);
-			//printf("Offset into data is:%ld\n\n",offset_into_data);
-
-			//printf("Current timestep variable after checking if offset less than max_timesteps is:%ld\n",cur_timestep);
-
-			current_index = i % total_streams;
-			next_index = (i+1) % total_streams;
-
-			//printf("Current Index: %d , Next Index: %d\n",current_index,next_index);
-
-			//-----------------------------------------Calling the Kernel-----------------------------------------------------------//
-			bird_movement<<<gridSize,blockSize,0,streams[current_index]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,d_udata+d_offset,
-											d_vdata+d_offset,d_u10data+d_offset,d_v10data+d_offset,d_dirData,
-											rand_norm_nums,d_precipData+d_offset,
-											d_pressureData+d_offset,d_lwData,d_birdStatus,d_birdTimesteps);
-
-			d_offset = TotalDataPerDay/sizeof(float) *((i+1) % 2);
-
-			HANDLE_ERROR(cudaMemcpyAsync(d_udata + d_offset,udata+h_offset,TotalDataPerDay,cudaMemcpyHostToDevice,streams[next_index]));
-			HANDLE_ERROR(cudaMemcpyAsync(d_vdata + d_offset,vdata+h_offset,TotalDataPerDay,cudaMemcpyHostToDevice,streams[next_index]));
-			HANDLE_ERROR(cudaMemcpyAsync(d_u10data + d_offset,u10data+h_offset,TotalDataPerDay,cudaMemcpyHostToDevice,streams[next_index]));
-			HANDLE_ERROR(cudaMemcpyAsync(d_v10data + d_offset,v10data+h_offset,TotalDataPerDay,cudaMemcpyHostToDevice,streams[next_index]));
-			HANDLE_ERROR(cudaMemcpyAsync(d_precipData + d_offset,precipData+h_offset,TotalDataPerDay,cudaMemcpyHostToDevice,streams[next_index]));
-			HANDLE_ERROR(cudaMemcpyAsync(d_pressureData + d_offset,pressureData+h_offset,TotalDataPerDay,cudaMemcpyHostToDevice,streams[next_index]));
-
-
-		 	HANDLE_ERROR(cudaStreamSynchronize(streams[next_index]));
-			HANDLE_ERROR(cudaStreamSynchronize(streams[current_index]));
-			//HANDLE_ERROR(cudaDeviceSynchronize());
-
-			
-
-			
-		}	
-		h_offset = (TIMESTEPS_PER_DAY * LAT_SIZE * LONG_SIZE) * (i + 1) + INITIAL_SKIP_TIMESTEPS;
-		
-	}
-*/
-
 
 	HANDLE_ERROR(cudaMemcpy(h_row,d_row,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyDeviceToHost));
 	HANDLE_ERROR(cudaMemcpy(h_col,d_col,NumOfBirds * (TIMESTEPS + 1 ) * sizeof(float),cudaMemcpyDeviceToHost));
@@ -1559,7 +1499,6 @@ int main(int argc,char* argv[])
 	HANDLE_ERROR(cudaFree(d_precipData));
 	HANDLE_ERROR(cudaFree(d_pressureData));
 
-	HANDLE_ERROR(cudaFree(rand_norm_nums));
 	HANDLE_ERROR(cudaFree(d_row));	
 	HANDLE_ERROR(cudaFree(d_col));	
 	HANDLE_ERROR(cudaFree(d_birdStatus));
