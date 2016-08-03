@@ -258,6 +258,11 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product)
 
 		if(index == 1.0){
 			var_product2 = 0;		
+		}else if (index == 0){ //If bird is above sea
+			var_product2 = birdStatus[id];
+			
+		}else if (index > 1){ //If bird is above fresh water
+			var_product2 = birdStatus[id];
 		}
 	
 		if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
@@ -267,9 +272,9 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product)
 		l = l + 1;
 	}
 
-	if(index == 0){
+	/* if(index == 0){
 		birdStatus[id] = 0;
-	}
+	} */
 	return l;
 	
 }
@@ -333,14 +338,14 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,
 
 		//Checking if the bird found land
 		//Limit calculated only if bird found at land the first time
-		if(index == 1){
+		if(index == 1){ //If bird is above land
 			var_product2 = 0;
 			timesteps_limit = __float2ull_ru(count_timeSteps/24) * 24 + 24 * StopoverDays; 					
-		}else if (index == 0){
-			var_product2 = 1;
+		}else if (index == 0){ //If bird is above sea
+			var_product2 = birdStatus[id];
 			
-		}else if (index > 1){
-			var_product2 = 0;
+		}else if (index > 1){ //If bird is above fresh water
+			var_product2 = birdStatus[id];
 		}
 
 		l = l + var_product2;
@@ -520,12 +525,12 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 	//Thread indices
 	int id = blockIdx.x * blockDim.x + threadIdx.x; 
 
-	if(id > (NumOfBirds -1)||(birdStatus[id]==0)||(birdTimesteps[id] > cur_l)){ 
+	//if(id > (NumOfBirds -1)||(birdStatus[id]==0)||(birdTimesteps[id] > cur_l)){ 
+	if(id > (NumOfBirds -1)||(birdTimesteps[id] > cur_l)){ 
 
 	//The condition cur_l > max_timesteps is OK now because all birds start at the same time
 	//NOT OK once birds start at different dates
-//	if((id > (NumOfBirds -1)) || (birdTimesteps[id] >= cur_l)){ 
-//	if(id > (NumOfBirds -1)){
+
 		return;
 	}
 	
@@ -621,8 +626,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 				wrappedAngle = randNorm(id,l, actualAngle, STD_BIRDANGLE);
 
 				if(wrappedAngle > 360){
-					wrappedAngle = wrappedAngle - 360;
-			
+					wrappedAngle = wrappedAngle - 360;		
 				}else if(wrappedAngle < 0 ){
 					wrappedAngle = 360 + wrappedAngle;
 				}	
@@ -645,8 +649,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			
 				var_product = birdStatus[id] * var_profit_10m * l_product;
 				//Storing the new values
-				rowArray[id * arrLength + l] = pos_row + var_product * (v_val + vDir_value ) * 0.36 * -1;
-				colArray[id * arrLength + l] = pos_col + var_product * (u_val + uDir_value) * 0.36;
+				rowArray[id * arrLength + l] = pos_row + var_product * (v_val + vDir_value ) * birdStatus[id] * 0.36 * -1;
+				colArray[id * arrLength + l] = pos_col + var_product * (u_val + uDir_value) * birdStatus[id]* 0.36;
 					
 				//printf("6 Hour Flight\tRow: %f,Col:%f\n",rowArray[id * arrLength + l],colArray[id * arrLength + l]);
 				//printf("6 hour flight;Timestep #: %ld\n",l);
@@ -693,8 +697,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 				var_product = birdStatus[id] * var_profit_10m * var_sea * l_product;
 
 				//Getting new position values for row and column and storing it 
-				pos_row = pos_row + var_product * (v_val + vDir_value ) * 0.36 * -1;
-				pos_col = pos_col + var_product * (u_val + uDir_value) * 0.36;
+				pos_row = pos_row + var_product * (v_val + vDir_value ) * birdStatus[id] * 0.36 * -1;
+				pos_col = pos_col + var_product * (u_val + uDir_value) * birdStatus[id] * 0.36;
 
 
 				//printf("+4 Hour Flight\tRow: %f,Col:%f\n",pos_row,pos_col);
@@ -718,31 +722,32 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 
 
 			if(index == 1){
-				var_10hrsSea = 0;
+				var_sea = 0;
 				//printf("Not at sea after 10 hours \n");
 			}else{
-				var_10hrsSea = 1;
+				
+				var_sea = 1;
 				//printf("At sea after 10 hours \n");
 			}
 		
 	//----------------------- If at sea even after the 10 hours but within 24 hours		
-			var_product = birdStatus[id] * var_profit_10m * var_sea * var_10hrsSea * l_product;
+			var_product = birdStatus[id] * var_profit_10m * var_sea * l_product;
 			l = bird_AtSea_Within24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product);
 	//------------------------						
 			//printf("Before getting the index \n");
 			index = lwData[__float2int_rd(pos_row * LongSize + pos_col)];
 			if(index == 1.0){
-				var_10hrsSea = 0;
+				var_sea = 0;
 				//printf("Not at sea after 24 hours \n");
 			}else{
-				var_10hrsSea = 1;
+				var_sea = 1;
 				//printf("At sea after 24 hours \n");
 			}
 			//printf("After getting the index \n");
 	//----------------------- If at sea even after the the 10 hours and beyond 24 hours 	
 			
 		
-			var_product = birdStatus[id] * var_profit_10m * var_sea * var_10hrsSea * l_product;
+			var_product = birdStatus[id] * var_profit_10m * var_sea * l_product;
 			if(var_product == 1){ 
 				printf("At sea after 24 hours \n");
 			}
@@ -1060,23 +1065,24 @@ int main(int argc,char* argv[])
 	sprintf(dayStr,"%d",day);
 	strcat(start_date,dayStr);
 
-//------------Opening row and column data file where lat and long data will be stored----------------//
+//------------Opening row and column output data file where lat and long
+//-------------------------------------------- positions are stored--------//
 	FILE *rowdataTxt,*coldataTxt,*birdStatusTxt;
 	FILE *vdataTxt,*udataTxt,*v10dataTxt,*u10dataTxt,*precipTxt,*pressureTxt,*lwTxt,*dirTxt;
 
-	rowdataTxt = fopen("row_output.txt","a");
+	rowdataTxt = fopen("./Output/row_output.txt","a");
 	if(rowdataTxt == NULL) {
 		perror("Cannot open output row data file\n");
 		exit(-1);
 	}
 
-	coldataTxt = fopen("col_output.txt","a");
+	coldataTxt = fopen("./Output/col_output.txt","a");
 	if(coldataTxt == NULL) {
 		perror("Cannot open output col data file\n");
 		exit(-1);
 	}
 
-	birdStatusTxt = fopen("birdStatus_Final.txt","a");
+	birdStatusTxt = fopen("./Output/birdStatus_Final.txt","a");
 	if(birdStatusTxt == NULL) {
 		perror("Cannot open output birdStatus file\n");
 		exit(-1);
