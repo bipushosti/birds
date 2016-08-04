@@ -64,7 +64,8 @@
 					//If STD_BIRDANGLE = 10 then the angle can differ +- (10*6)/2 = +- 30 from mean
 #define	glCompAcc		1e-8	//If the difference is equal to or less than this then equal
 
-#define MIN_PROFIT		-10
+#define MIN_PROFIT		10
+
 //Defining the x-variable size, it's sum and
 //sum of squares as needed for slope calculation
 
@@ -75,7 +76,7 @@
 //for each take off time(6pm or 7pm) instead of including all the pressure data files.
 //This helps in reducing the size of the data.
 
-#define REGRESSION_HRS		6
+#define REGRESSION_HRS		12
 
 //Precipitation (mm/hr) below which birds can fly
 #define MAX_PRECIP		2
@@ -146,6 +147,7 @@ float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* 
 	static float ret_data[3] = {0}; // ret_data[0] = new l value, 1 = new pos_row value , 2 = new pos_col
 	float dir_u,dir_v,u_val,v_val,dirAngle,precip_val,distance;
 	float prev_row,prev_col,wind_Speed,bird_AirSpeed;
+	float profit;
 	char *location;
 
 	//Index shows where the birds is currently at, Sea, Land or Fresh Water
@@ -169,7 +171,8 @@ float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* 
 	date[1] = malloc(5*sizeof(char));
 
 
-	if(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==index){
+	if((landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==0) || 
+		(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))]==2)){
 
 		int count_timesteps = 0;
 
@@ -212,10 +215,13 @@ float* check_bird_location(FILE* posFile,int* landWaterData,float* udata,float* 
 			distance = sqrt((pos_row - prev_row)*(pos_row - prev_row) + (pos_col - prev_col)*(pos_col - prev_col));
 
 
+			profit = getProfitValue(u_val,v_val,dirAngle,dir_u,dir_v);
 			if(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))] == 0){
 
 				//This function is for flight after the first 10 hours
-				fprintf(posFile,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tFlying at sea (After 10 hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
+//				fprintf(posFile,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tFlying at sea (After 10 hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
+
+				fprintf(posFile,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s %s\t%ld\t%ld\tFlying at sea (After 10 hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,dirAngle,precip_val,MIN_PROFIT,profit,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
 
 			}//If the bird finds water 
 			else if(landWaterData[(int)(rintf(pos_row)) * LONG_SIZE + (int)(rintf(pos_col))] == 1){
@@ -492,26 +498,44 @@ char** date_from_days(char** date,long timeStep)
 long convert_to_month(char* month,char * day)
 {
 	long index,offset;
+	int intMonth = 0;
+	int intDay = 0;
+	
 	if(strcmp(month,"AUG")==0){
 		index = 1; //The data starts in august
+		intMonth = 8;
 	}
 	else if(strcmp(month,"SEPT")==0){
 		index = 32; //The data for september starts after 31 days of august
+		intMonth = 9;
 	}
 	else if(strcmp(month,"OCT")==0){
 		index = 62; //The data for october starts after 31+30 days of sept and august respectively.
+		intMonth = 10;
 	}
 	else if(strcmp(month,"NOV")==0){
 		index = 93; //The data for october starts after 31+30+31 days of sept,aug and oct respectively.
+		intMonth = 11;
 	}
 	else{
 		printf("\n\t\tIncorrect month used\n\t\tUse between August-November inclusive; Only use abbriviated caps of the months; august = AUG\n");
 		return -1;
 	}
-	
-	offset = ((index-1)  + atoi(day))* TIMESTEPS_PER_DAY;
-	return offset;
 
+	intDay = atoi(day);
+	
+	//If 1st or 2nd of August, start at timestep 23 (after 23 hours)
+	if(((intMonth == 8) && (intDay == 1))||((intMonth == 8) && (intDay == 2))){
+		offset = 23;
+		//If in August; Gives correct result for starting timestep
+	}else if (intMonth == 8){
+		offset = 23 + (intDay - 1) * TIMESTEPS_PER_DAY ;
+	//23 added because 1st day only has 23 hours
+	}else{
+		offset = 23 + (index - 2 + intDay) * TIMESTEPS_PER_DAY;
+	}
+
+	return offset;
 }
 
 
@@ -868,6 +892,10 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 
 
 	while( i <= (TIMESTEPS-1) * LAT_SIZE * LONG_SIZE ) {
+		
+		if((TIMESTEPS - l) < 24){
+			return;
+		}
 
 		dir_v = 0;
 		dir_u = 0;
@@ -901,6 +929,7 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 		dir_u = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[0];
 		dir_v = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[1];
 
+		printf("Current timestep is: %ld\n",l);
 		printf("U10 and V10 values are: %f,%f\n",u_ten,v_ten);
 		printf("dir_u,dir_v values are %f,%f\n",dir_u,dir_v);
 		printf("10 profit value::%f\n",getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v));
@@ -917,7 +946,7 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 //************************************************************************************************************************************************
 //*********************Check profit value at ground; Or for V10 and U10***************************************************************************
 		float windProfit;
-		windProfit = getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v) ;
+		windProfit = getProfitValue(u_ten,v_ten,actualAngle,dir_u,dir_v);
 
 		//Relation between last_pressure and slope is an OR
 		if((windProfit >= MIN_PROFIT) && ((last_pressure>=1009)||(slope >-1))){
@@ -1020,6 +1049,8 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 				}
 			}
 		
+			dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+			dirAngle = WrappedNormal(dirAngle,STD_BIRDANGLE);
 //-------------------------------------------End of the 6 hour bird flight------------------------------------------------------------------------------------
 
 //-------------------------------------------If bird at sea at the end of the 6 hour flight-------------------------------------------------------------------
@@ -1030,8 +1061,6 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 				//Move in the preferred direction for additional 4 hours
 				for(k=6;k<10;k++,l++){
 
-					dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
-					dirAngle = WrappedNormal(dirAngle,STD_BIRDANGLE);
 
 					dir_u = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[0];
 					dir_v = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[1];
@@ -1054,8 +1083,8 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 					
 
 					//fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t\t%s %sDuring the additional 4 hours \n",start_date,starting_row,starting_col,pos_row,pos_col,u_val,v_val,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,date[0],date[1]);
-
 					fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s %s\t%ld\t%ld\tFlying at sea (After 6 hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,dirAngle,precip_val,last_pressure,slope,MIN_PROFIT,windProfit,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
+					//fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s %s\t%ld\t%ld\tFlying at sea (After 6 hours)\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,dirAngle,precip_val,last_pressure,slope,MIN_PROFIT,windProfit,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
 				}
 
 
@@ -1105,10 +1134,21 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 				for(ii = 0;ii<18;ii++){
 					u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
 					v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
-					precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
 					date =  date_from_days(date,l);
 
-					fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tLand After 6 hours\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l - start_l);
+					dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+					precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
+					dir_u = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[0];
+					dir_v = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[1];
+					wind_Speed = sqrt(u_val * u_val + v_val * v_val);
+					bird_AirSpeed = sqrt((u_val+dir_u)*(u_val+dir_u) +(v_val+dir_v)*(v_val+dir_v));
+					distance = sqrt((pos_row - prev_row)*(pos_row - prev_row) + (pos_col - prev_col)*(pos_col - prev_col));
+
+					
+					
+					
+					//fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tLand After 6 hours\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l - start_l);
+					fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s %s\t%ld\t%ld\tLand after 6 hours\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,dirAngle,precip_val,last_pressure,slope,MIN_PROFIT,windProfit,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
 					//tmp_l ++;
 					l++;
 				}
@@ -1140,15 +1180,24 @@ void get_movementData(FILE* outTxt,float starting_row,float starting_col,long l,
 
 			for(jj = 0;jj<24;jj++,l++){
 
+				dirAngle = dirData[(int)(rintf(pos_row) * LAT_SIZE + rintf(pos_col))];
+				precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
+				dir_u = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[0];
+				dir_v = get_u_v_dirAngle(dirAngle,DESIRED_SPEED)[1];
+				wind_Speed = sqrt(u_val * u_val + v_val * v_val);
+				bird_AirSpeed = sqrt((u_val+dir_u)*(u_val+dir_u) +(v_val+dir_v)*(v_val+dir_v));
+				distance = sqrt((pos_row - prev_row)*(pos_row - prev_row) + (pos_col - prev_col)*(pos_col - prev_col));
+
+				
 				//Bilinear interpolation for u and v data
 				u_val = bilinear_interpolation(pos_col,pos_row,udata,l,1);	
 				v_val = bilinear_interpolation(pos_col,pos_row,vdata,l,1);
 				precip_val = bilinear_interpolation(pos_col,pos_row,precipData,l,1);
 
 
-				fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tProfit Value low at 10m\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
+				//fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\tNA\tNA\tNA\tNA\t%d\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\t%ld\t%s %s %s\t%ld\t%ld\tProfit Value low at 10m\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,MIN_PROFIT,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
+				fprintf(outTxt,"%s\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%d\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%f\t%ld\t%s %s %s\t%ld\t%ld\tProfit Value low at 10m\\n",start_date,starting_row,starting_col,pos_row,pos_col,DESIRED_SPEED,u_val,v_val,dirAngle,precip_val,last_pressure,slope,MIN_PROFIT,windProfit,dir_u,dir_v,u_val+dir_u,v_val+dir_v,bird_AirSpeed,wind_Speed,distance*10,l,year,date[1],date[0],(l - start_l +6)/TIMESTEPS_PER_DAY + 1,l-start_l);
 			}
-			l+=24;
 
 		}//End If for profit value of v10 and u10
 
@@ -1264,7 +1313,7 @@ int main(int argc,char* argv[])
 	}
 	else{
 		printf("\n\tInvalid year specified\n\tSpecified %s; Use years from 2008 to 2013 in its full format\n",argv[1]);
-		printf("\tUsage:\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes)\n\n");
+		printf("\tUsage:\t\tExecutableFileName StartYear(Full year)  StartMonth(Abbr. all caps) StartDay(Without initial zeroes) StartingRowCoordinate StartingColCoordinate StartingTime(24Hrs/Military::::Ignore for now\n\n");
 		return 0;		
 	}
 
