@@ -115,22 +115,22 @@ Precipitation = millimeters
 //--------------------------------------------------------------------------------------------------------------------------
 __global__ void setup_kernel(unsigned int seed,curandState *states,int NumOfBirds);
 __global__ void generate_kernel(curandState *states,float* numbers,int NumOfBirds);				
-__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int cur_l,long int max_timesteps,float* udata,float* vdata,
+__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int start_l,int cur_l,int max_timesteps,float* udata,float* vdata,
 				float* u10data,float* v10data,float* dirData,float* precipData,float* pressureData,
 				float* lwData,uint8_t* birdStatus,int* birdTimesteps);
 				
 __device__ float bilinear_interpolation_SmallData(float x,float y,float* data_array);
-__device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,long l);
-__device__ float WrappedNormal(int id,float MeanAngle,float AngStdDev,float* rand_norm_nums,long int cur_timestep);
+__device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,int l);
+__device__ float WrappedNormal(int id,float MeanAngle,float AngStdDev,float* rand_norm_nums,int cur_timestep);
 __device__ float getProfitValue(float u_val,float v_val,float dirVal,float dir_u,float dir_v);
-__device__ long int bird_AtSea_Within24Hrs(int id,int arrLength,float* rowArray,float* colArray,long int start_l,
-					long int l,float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,uint8_t l_product);
+__device__ int bird_AtSea_Within24Hrs(int id,int arrLength,float* rowArray,float* colArray,int start_l,
+					int l,float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,uint8_t l_product,uint8_t l_idx);
 					
-__device__ float randNorm(int id, long int timestep, float mean, float stdev);
+__device__ float randNorm(int id, int timestep, float mean, float stdev);
 
 static void* write_dataVars(void* arguments);
 static void* read_dataFiles(void* arguments);
-long int convert_to_month(int month,int day);
+int convert_to_month(int month,int day);
 static void HandleError( cudaError_t err,const char *file, int line );
 long Get_GPU_devices();
 //-------------------------------------------------------------------------------------------------------------------------------------
@@ -188,7 +188,7 @@ __device__ int CurrentTimestep = 0;
 //Using the theorem to get u1: a1 = 1791, m1 = 2864 and c1 = 5827. (c1 is prime therefore c1 is relatively prime with any other number; Choosing m1=2864
 //	so that the prime factors are 2 and 179; Now, a1 = 179*10 + 1 as a1-1 has to be divisible by prime factors of m1)
 //Using the theorem to get u2: a2 = 931, m2 = 5382 and c2 = 9461. (31, 2 and 3 are prime factors of 5382, therefore a2 = 931)
-__device__ float randNorm(int id, long int timestep, float mean, float stdev)
+__device__ float randNorm(int id, int timestep, float mean, float stdev)
 {
     int tmp, seed, a1, m1, c1, a2, m2, c2;
 	float x, u1, u2;
@@ -216,19 +216,22 @@ __device__ float randNorm(int id, long int timestep, float mean, float stdev)
 }
 //###########################################################################################################################################//
 
-__device__ long int bird_AtSea_Within24Hrs(int id,int arrLength,float* rowArray,float* colArray,long int start_l,long int l,
-float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product)
+
+__device__ int bird_AtSea_Within24Hrs(int id,int arrLength,float* rowArray,float* colArray,int start_l,int l,
+float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,uint8_t l_product,uint8_t l_idx)
 {
 	float u_val,v_val,u_dir,v_dir,pos_row,pos_col;
 	float index = 0;
-	long int bckp_l;
+	int bckp_l;
 	float count_timeSteps = 0;
 	uint8_t var_product2;
 
 	var_product2 = var_product;
 
-	pos_row = rowArray[id * arrLength + l - 1];
-	pos_col = colArray[id * arrLength + l - 1];
+	pos_row = rowArray[id * arrLength + l - l_idx];
+	pos_col = colArray[id * arrLength + l - l_idx];
+
+	
 	
 	u_dir = DesiredSpeed * cosf(BirdSeaAngle * (pi/180));
 	v_dir = DesiredSpeed * sinf(BirdSeaAngle * (pi/180));
@@ -269,9 +272,9 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product)
 			birdStatus[id] = 0;
 		}
 
-		l = l + 1;
+		l = l + l_product;
 	}
-
+	l = l - l_product;
 	/* if(index == 0){
 		birdStatus[id] = 0;
 	} */
@@ -282,31 +285,39 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product)
 
 //###########################################################################################################################################//
 
-__device__ long int bird_AtSea_After24Hrs(int id,int arrLength,float* rowArray,float* colArray,long int start_l,long int l,
+__device__ int bird_AtSea_After24Hrs(int id,int arrLength,float* rowArray,float* colArray,int start_l,int l,
 float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,uint8_t l_product)
 {
 	float u_val,v_val,u_dir,v_dir,pos_row,pos_col;
 	int count_timeSteps, timesteps_limit, index;
 	uint8_t var_product2;
-
 		
 	index = 0;
 	var_product2 = var_product;
 
-	pos_row = rowArray[id * arrLength + l ];
-	pos_col = colArray[id * arrLength + l ];
+	pos_row = rowArray[id * arrLength + l - 1];
+	pos_col = colArray[id * arrLength + l - 1];
 	//printf("After getting the first row and cols (Inside After 24 hours function)\n");
 
 	u_dir = DesiredSpeed * cosf(BirdSeaAngle * (pi/180));
 	v_dir = DesiredSpeed * sinf(BirdSeaAngle * (pi/180));
 	
 
+	//These 25 for both condition as the for loop must 
+	//be done atleast once so that l=l+l_product is done inside
+	//the loop and it is offset by l=l-l_product outside the loop.
 	if(l_product == 0){
-		timesteps_limit = 24;
+		timesteps_limit = 25;
 	}else{
 		timesteps_limit = BirdHrsLimit;
 	}
 
+	
+	if(var_product2 == 0){
+		timesteps_limit = 25;
+	}else{
+		timesteps_limit = BirdHrsLimit;
+	}
 
 	//printf("After getting the timestep limit (Inside After 24 hours function)\n");
 	//This loop is skipped if a bird is not at sea after 24 hours
@@ -342,13 +353,14 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,
 			var_product2 = 0;
 			timesteps_limit = __float2ull_ru(count_timeSteps/24) * 24 + 24 * StopoverDays; 					
 		}else if (index == 0){ //If bird is above sea
-			var_product2 = birdStatus[id];
+			var_product2 = var_product2;
 			
 		}else if (index > 1){ //If bird is above fresh water
-			var_product2 = birdStatus[id];
+			var_product2 = var_product2;
 		}
 
-		l = l + var_product2;
+		//l = l + var_product2;
+		l = l + l_product;
 
 		if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0.0)||(pos_col < 0.0 )){
 			birdStatus[id] = 0;
@@ -362,6 +374,7 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,
 		birdStatus[id] = 0;
 	}
 	
+	l = l - l_product;
 	return l;
 	
 	
@@ -438,7 +451,7 @@ __device__ float bilinear_interpolation_SmallData(float x,float y,float* data_ar
 
 //###########################################################################################################################################//
 
-__device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,long int l)
+__device__ float bilinear_interpolation_LargeData(float x,float y,float* data_array,int l)
 {
 	float x1,y1,x2,y2;
 	float Q11,Q12,Q21,Q22,R1,R2,R;
@@ -517,7 +530,7 @@ __global__ void generate_kernel(curandState *states,float* numbers,int NumOfBird
 //###########################################################################################################################################//
 //###########################################################################################################################################//
 //###########################################################################################################################################//
-__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,long int start_l,long int cur_l,long int max_timesteps,float* udata,float* vdata,
+__global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int start_l,int cur_l,int max_timesteps,float* udata,float* vdata,
 				float* u10data,float* v10data,float* dirData,float* precipData,float* pressureData,
 				float* lwData,uint8_t* birdStatus,int* birdTimesteps)
 {
@@ -530,16 +543,19 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 
 	//The condition cur_l > max_timesteps is OK now because all birds start at the same time
 	//NOT OK once birds start at different dates
-
+		if(birdTimesteps[id] > cur_l){
+			printf("birdTimesteps: %d, cur_l: %d\n",birdTimesteps[id],cur_l);
+			
+		}
 		return;
 	}
 	
 	else{
 
 
-		uint8_t var_sea, var_profit_10m, var_10hrsSea, var_product, l_product;
+		uint8_t var_sea, var_profit_10m, var_10hrsSea, var_product, l_product,l_idx;
 		//Making a local copy of the timstep variable
-		long int l,new_l;
+		int l,new_l,prev_l;
 		long l_old;	
 		float profit_value,actualAngle,wrappedAngle, index;
 		float last_pressure,pressure_sum,pressure_MultSum,slope;
@@ -557,10 +573,10 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			l_product = 1;
 		}
 
-		l_product = 1;
+	//	l_product = 1;
 		l = cur_l;
 		new_l = l;
-		arrLength = (TotalTimesteps + 1);
+		arrLength = (TotalTimesteps + 1); //Why +1 ?
 	
 
 		slope = 0;
@@ -578,9 +594,11 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 
 		while((l < max_timesteps) && (days<5)){
 
-			pos_row = rowArray[id * arrLength + l - 1];
+			pos_row = rowArray[id * arrLength + l - 1]; //Why -1 ?
 			pos_col = colArray[id * arrLength + l - 1];
-	
+
+			
+			
 			if((pos_row > LatSize) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
 				birdStatus[id] = 0;
 			}
@@ -618,7 +636,10 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 
 			printf("l_product: %d \n",l_product);
 
-			printf("Current timestep: %ld\n",l);
+			printf("Start timestep: %d\n",l);
+			prev_l = l;
+			
+	//-----------------------------The 6 hour flight
 			for(k=0;k<6;k++) {
 		
 				//Getting the wrapped angle
@@ -639,8 +660,10 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 				precip_val = bilinear_interpolation_LargeData(pos_col,pos_row,precipData,l-start_l);
 
 				//Getting the previous position values for row and column
-				pos_row = rowArray[id * arrLength + l - 1];
+				pos_row = rowArray[id * arrLength + l - 1]; 
 				pos_col = colArray[id * arrLength + l - 1];
+				
+				//printf("During 6 hour flight: Row: %f \t Col: %f (id:%d)\n\n\n",pos_row,pos_col,id);
 			
 				if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
 					birdStatus[id] = 0;
@@ -648,22 +671,29 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 				}
 			
 				var_product = birdStatus[id] * var_profit_10m * l_product;
+				
 				//Storing the new values
-				rowArray[id * arrLength + l] = pos_row + var_product * (v_val + vDir_value ) * birdStatus[id] * 0.36 * -1;
-				colArray[id * arrLength + l] = pos_col + var_product * (u_val + uDir_value) * birdStatus[id]* 0.36;
+				rowArray[id * arrLength + l] = pos_row + var_product * (v_val + vDir_value ) * 0.36 * -1;
+				colArray[id * arrLength + l] = pos_col + var_product * (u_val + uDir_value) * 0.36;
 					
 				//printf("6 Hour Flight\tRow: %f,Col:%f\n",rowArray[id * arrLength + l],colArray[id * arrLength + l]);
 				//printf("6 hour flight;Timestep #: %ld\n",l);
-			
+				
+				
 				l = l + l_product;
 
 			}	
 		
+			//If l_product = 0 then the timestep should remain the same
+			if (prev_l == l){
+				l_idx = 0;				
+			}else{
+				l_idx = 1;
+			}
+			
 			//The value of l increases at the last iteration 
-
-			//printf("After 6 hour flight over\n");
-			pos_row = rowArray[id * arrLength + l - 1];
-			pos_col = colArray[id * arrLength + l - 1];
+			pos_row = rowArray[id * arrLength + l - l_idx];
+			pos_col = colArray[id * arrLength + l - l_idx];
 		
 			index = lwData[__float2int_rd(pos_row * LatSize + pos_col)];
 			// If the bird is at sea after the first 6 hours of flight 
@@ -687,30 +717,33 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 			uDir_value = DesiredSpeed * cosf(wrappedAngle * (pi/180));
 			vDir_value = DesiredSpeed * sinf(wrappedAngle * (pi/180));
 
-
+			prev_l = l;
 	//-----------------------At sea after first 6 hours of flight
 			for(k=6;k<10;k++){
 							
 				u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l-start_l);
 				v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l-start_l);
+				printf("During +4 hours: u_val: %f, v_val: %f,l:%d\n",u_val,v_val,l);
+		
 		
 				var_product = birdStatus[id] * var_profit_10m * var_sea * l_product;
 
 				//Getting new position values for row and column and storing it 
-				pos_row = pos_row + var_product * (v_val + vDir_value ) * birdStatus[id] * 0.36 * -1;
-				pos_col = pos_col + var_product * (u_val + uDir_value) * birdStatus[id] * 0.36;
+				pos_row = pos_row + var_product * (v_val + vDir_value ) * 0.36 * -1;
+				pos_col = pos_col + var_product * (u_val + uDir_value)  * 0.36;
 
-
+				
 				//printf("+4 Hour Flight\tRow: %f,Col:%f\n",pos_row,pos_col);
 				//printf("+4 hour flight;Timestep #: %ld\n",l);
 
 				if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
 					birdStatus[id] = 0;
+					printf("status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
 				}
 
 				rowArray[id * arrLength + l] = pos_row;
 				colArray[id * arrLength + l] = pos_col;
-	
+				printf("During +4 hour flight: Row: %f \t Col: %f (id:%d)\n\n\n",pos_row,pos_col,id);
 				//printf("+4 Hour Flight\tRow: %f,Col:%f\n",rowArray[id * arrLength + l + 1],colArray[id * arrLength + l + 1]);
 			
 				l = l + l_product;
@@ -732,16 +765,21 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		
 	//----------------------- If at sea even after the 10 hours but within 24 hours		
 			var_product = birdStatus[id] * var_profit_10m * var_sea * l_product;
-			l = bird_AtSea_Within24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product);
+			l = bird_AtSea_Within24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product,l_product,l_idx);
 	//------------------------						
+			printf("Timestep after bird_AtSea_Within24Hrs %d\n",l);
+			
+			pos_row = rowArray[id * arrLength + l - 1]; //Why -1 ?
+			pos_col = colArray[id * arrLength + l - 1];
+			
 			//printf("Before getting the index \n");
 			index = lwData[__float2int_rd(pos_row * LongSize + pos_col)];
 			if(index == 1.0){
 				var_sea = 0;
-				//printf("Not at sea after 24 hours \n");
+				printf("Var_sea: Not at sea after 24 hours (id:%d) \n",id);
 			}else{
 				var_sea = 1;
-				//printf("At sea after 24 hours \n");
+				printf("Var_sea: At sea after 24 hours (id:%d) \n",id);
 			}
 			//printf("After getting the index \n");
 	//----------------------- If at sea even after the the 10 hours and beyond 24 hours 	
@@ -749,15 +787,18 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 		
 			var_product = birdStatus[id] * var_profit_10m * var_sea * l_product;
 			if(var_product == 1){ 
-				printf("At sea after 24 hours \n");
+				printf("Var product = 1 : Calculations done for at sea after 24 hours(id:%d) \n",id);
+			}else{
+				printf("Var product = 0; No calculations for at sea after 24 hours (id:%d) \n",id);
 			}
 			//printf("After the variable product \n");
 
+			printf("birdStatus[%d]: %d,var_profit_10m: %d,var_sea: %d,l_product: %d \n",id,birdStatus[id],var_profit_10m,var_sea,l_product);
 			//printf("The current value of l is: %ld And of start_l is: %ld \n\n",l,start_l);
 			l = bird_AtSea_After24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product,l_product);
-			
-			days = (l - start_l)/TIMESTEPS_PER_DAY;
-			printf("Days: %d\n",days);
+			printf("Timestep after bird_AtSea_After24Hrs %d (id: %d)\n",l,id);
+			//days = (l - start_l)/TIMESTEPS_PER_DAY;
+			//printf("Days: %d\n",days);
 			//printf("After bird_AtSea_After24Hrs and before regression calculations \n");
 	//------------------------	
 			birdTimesteps[id] = l;
@@ -765,8 +806,14 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 
 			pressure_sum = 0;
 			pressure_MultSum = 0;
+			
+			if(birdStatus[id]==1){
+				k=1;
+			}else{
+				k=RegressionHrs+1;
+			}
 			//Taking the pressure from 6 hours earlier of the location where the bird landed
-			for(k=1; (l_old < l) && (k<=RegressionHrs); l_old++,k++){
+			while((l_old < l) && (k<=RegressionHrs)){
 
 				pressure_sum += bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old-start_l);  //<----------------ERROR HERE
 				pressure_MultSum += k * bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old-start_l);
@@ -775,10 +822,22 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,lon
 				if(k == RegressionHrs) {
 					last_pressure = bilinear_interpolation_LargeData(pos_col,pos_row,pressureData,l_old-start_l);
 				}
+				l_old++;
+				k++;
 			}
-			slope = ((RegressionHrs * pressure_MultSum) - (pressure_sum * HrsSum))/(DenomSlope);
-	
-			printf("Row: %f \t Col: %f \n",pos_row,pos_col);
+			if(birdStatus[id]==1){
+				slope = ((RegressionHrs * pressure_MultSum) - (pressure_sum * HrsSum))/(DenomSlope);
+			}else{
+				slope = 0;
+			}
+			
+			
+			printf("l: %d,birdTimesteps[id]: %d (id:%d)\n",l,birdTimesteps[id],id);
+			days++;
+			printf("Days: %d (id:%d)\n",days,id);
+			printf("Row: %f \t Col: %f (id:%d)\n\n\n",pos_row,pos_col,id);
+			printf("--------------------------------------------------------------\n");
+			l = l + l_product;
 					
 		}
 	}
@@ -921,9 +980,9 @@ static void* write_dataVars(void* arguments)
 
 
 //###########################################################################################################################################//
-long int convert_to_month(int month,int day)
+int convert_to_month(int month,int day)
 {
-	long int index,offset;
+	int index,offset;
 	if(month == 8){
 		index = 1; //The data starts in august
 	}
@@ -982,7 +1041,7 @@ int main(int argc,char* argv[])
 	char yearStr[4],monthStr[2],dayStr[2];
 
 	float starting_row,starting_col;
-	long int offset_into_data = 0;
+	int offset_into_data = 0;
 	int NumOfBirds,year,day,month;
 
 	int option;
@@ -1040,7 +1099,7 @@ int main(int argc,char* argv[])
 	Instead of AUG 1 it starts at August 2 (because data starts at 7pm but birds fly at 6pm) **/
 	offset_into_data = convert_to_month(month,day);
 	
-	printf("Offset into data is: %ld\n",offset_into_data);
+	printf("Offset into data is: %d\n",offset_into_data);
 
 //-----------------------------------------------Year-----------------------------------------//
 /** Checking if correct year specified **/
@@ -1226,7 +1285,7 @@ int main(int argc,char* argv[])
 		h_birdTimesteps[ii] = (int)offset_into_data;
 	}
 
-//--------------------------Initializing the structures-------------------------------------------------------------------//
+//--------------------------Initializing the structures for pthreads-----------------------------------------------------------//
 
 	
 	inpStruct[0].fp = vdataTxt;
@@ -1326,8 +1385,9 @@ int main(int argc,char* argv[])
 	int DaysRemaining_Transferrable = (TOTAL_DAYS - MaxFlightDays) - DaysTransferrable ;
 
 //-----------------------------------------------------------------------------------------------------------------------------//
-	long int start_timestep,cur_timestep,max_timesteps,h_offset,d_offset,h_offsetStart,d_offsetStart;
-
+	long int h_offset,d_offset,h_offsetStart,d_offsetStart;
+	int start_timestep,cur_timestep,max_timesteps;
+	
 	h_offset = INITIAL_SKIP_TIMESTEPS * TIMESTEPS_PER_DAY * LAT_SIZE * LONG_SIZE;
 	d_offset = 0;
 	cur_timestep = offset_into_data;
@@ -1454,13 +1514,13 @@ int main(int argc,char* argv[])
 			 	HANDLE_ERROR(cudaStreamSynchronize(streams[jj]));
 			}
 			
-			
+			printf("########################################################################");
+			printf("Kernel call# %d\n",zz);
 			
 			bird_movement<<<gridSize,blockSize,0,streams[30]>>>(d_row,d_col,NumOfBirds,start_timestep,cur_timestep,max_timesteps,
 			d_udata,d_vdata,d_u10data,d_v10data,d_dirData,d_precipData,d_pressureData,d_lwData,d_birdStatus,d_birdTimesteps);
 
 			zz++;
-			printf("Kernel call# %d\n",zz);
 			
 			HANDLE_ERROR(cudaStreamSynchronize(streams[30]));
 
