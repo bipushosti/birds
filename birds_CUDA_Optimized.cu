@@ -268,7 +268,7 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,
 			var_product2 = birdStatus[id];
 		}
 	
-		if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
+		if((pos_row > LatSize-1)||(pos_row >= MaxLatSouth) || (pos_col > LongSize-1)||(pos_row < 0.0)||(pos_col < 0.0 )){
 			birdStatus[id] = 0;
 		}
 
@@ -362,7 +362,7 @@ float* udata,float* vdata,float* lwData,uint8_t* birdStatus,uint8_t var_product,
 		//l = l + var_product2;
 		l = l + l_product;
 
-		if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0.0)||(pos_col < 0.0 )){
+		if((pos_row > LatSize-1)||(pos_row >= MaxLatSouth) || (pos_col > LongSize-1)||(pos_row < 0.0)||(pos_col < 0.0 )){
 			birdStatus[id] = 0;
 		}
 	}
@@ -599,8 +599,9 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 
 			
 			
-			if((pos_row > LatSize) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
+			if((pos_row > LatSize-1) ||(pos_row >= MaxLatSouth) || (pos_col > LongSize-1)||(pos_row < 0.0)||(pos_col < 0.0)){
 				birdStatus[id] = 0;
+				printf("(Before computation) status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
 			}
 
 			//--------------Getting the wrapped angle
@@ -665,8 +666,9 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 				
 				//printf("During 6 hour flight: Row: %f \t Col: %f (id:%d)\n\n\n",pos_row,pos_col,id);
 			
-				if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
+				if((pos_row > LatSize-1)||(pos_row >= MaxLatSouth) || (pos_col > LongSize-1)||(pos_row < 0.0)||(pos_col < 0.0 )){
 					birdStatus[id] = 0;
+					printf("(In 6 hours flight) status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
 					//printf("Dead bird \n");
 				}
 			
@@ -696,13 +698,14 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 			pos_col = colArray[id * arrLength + l - l_idx];
 		
 			index = lwData[__float2int_rd(pos_row * LatSize + pos_col)];
+
 			// If the bird is at sea after the first 6 hours of flight 
 			if( index == 1.0){
 				var_sea = 0;
-				//printf("Not at sea after 6 hours \n");
+				printf("Not at sea after 6 hours \n");
 			}else{
 				var_sea = 1;
-				//printf("At sea after 6 hours \n");
+				printf("At sea after 6 hours \n");
 			}
 
 			//Getting the wrapped angle; Same uDir_value and vDir_value used for the 4 hours
@@ -723,7 +726,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 							
 				u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l-start_l);
 				v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l-start_l);
-				printf("During +4 hours: u_val: %f, v_val: %f,l:%d\n",u_val,v_val,l);
+
 		
 		
 				var_product = birdStatus[id] * var_profit_10m * var_sea * l_product;
@@ -736,14 +739,15 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 				//printf("+4 Hour Flight\tRow: %f,Col:%f\n",pos_row,pos_col);
 				//printf("+4 hour flight;Timestep #: %ld\n",l);
 
-				if((pos_row > LatSize)||(pos_row > MaxLatSouth) || (pos_col >LongSize)||(pos_row < 0)||(pos_col < 0 )){
+				if((pos_row > LatSize -1 )||(pos_row >= MaxLatSouth) || (pos_col > LongSize -1 )||(pos_row < 0.0)||(pos_col < 0.0 )){
 					birdStatus[id] = 0;
-					printf("status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
+					printf("(During +4 hour flight) status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
 				}
 
 				rowArray[id * arrLength + l] = pos_row;
+
 				colArray[id * arrLength + l] = pos_col;
-				printf("During +4 hour flight: Row: %f \t Col: %f (id:%d)\n\n\n",pos_row,pos_col,id);
+				printf("During +4 hour flight: Row: %f \t Col: %f, u_val: %f, v_val: %f, l:%d (id:%d)\n\n\n",pos_row,pos_col,u_val,v_val,l,id);
 				//printf("+4 Hour Flight\tRow: %f,Col:%f\n",rowArray[id * arrLength + l + 1],colArray[id * arrLength + l + 1]);
 			
 				l = l + l_product;
