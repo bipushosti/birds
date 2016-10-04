@@ -190,29 +190,36 @@ __device__ int CurrentTimestep = 0;
 //Using the theorem to get u2: a2 = 931, m2 = 5382 and c2 = 9461. (31, 2 and 3 are prime factors of 5382, therefore a2 = 931)
 __device__ float randNorm(int id, int timestep, float mean, float stdev)
 {
-    int tmp, seed, a1, m1, c1, a2, m2, c2;
+	int tmp, seed, a1, m1, c1, a2, m2, c2;
 	float x, u1, u2;
-	
+
+
+	//Seed has to be higher than int
 	seed = (id+1)*(int)timestep;
 	a1 = 1791;
 	m1 = 2864;
 	c1 = 5827;
-	
+
 	a2 = 931;
 	m2 = 5382;
 	c2 = 9461;
-	
+
 	tmp = (a1 * seed + c1) % m1;
+	if(tmp == 0) tmp=1;
 	u1 = (float)tmp/(float)m1;
-	
+
+
+
 	tmp = (a2 * seed + c2) % m2;
+	if(tmp == 0) tmp=1;
 	u2 = (float)tmp/(float)m2;
+
+	x = sqrt(-2.0*logf(u1)) * cosf(2*pi*u2);
+	x = x*stdev + mean;
 	
-    x = sqrt(-2.0*logf(u1)) * cosf(2*pi*u2);
-    x = x*stdev + mean;
-	
-	
-    return x;
+	if(id==34)printf("timestep: %d, tmp2: %d,u1: %f, u2: %f,x: %f\n",timestep,tmp,u1,u2,x);
+
+	return x;
 }
 //###########################################################################################################################################//
 
@@ -601,7 +608,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 			
 			if((pos_row > LatSize-1) ||(pos_row >= MaxLatSouth) || (pos_col > LongSize-1)||(pos_row < 0.0)||(pos_col < 0.0)){
 				birdStatus[id] = 0;
-				printf("(Before computation) status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
+				if(id==34) printf("(Before computation) status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
 			}
 
 			//--------------Getting the wrapped angle
@@ -634,10 +641,9 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 			//--------------
 
 		
+			if(id==34) printf("l_product: %d \n",l_product);
 
-			printf("l_product: %d \n",l_product);
-
-			printf("Start timestep: %d\n",l);
+			if(id==34) printf("Start timestep: %d\n",l);
 			prev_l = l;
 			
 	//-----------------------------The 6 hour flight
@@ -645,6 +651,7 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 		
 				//Getting the wrapped angle
 				actualAngle = dirData[__float2int_rd(pos_row * LatSize + pos_col)];
+				if(id==34) printf("(Inside 6 hour flight) l: %d,STD_BIRDANGLE: %f,actualAngle: %f, (id: %d)\n",l,STD_BIRDANGLE,actualAngle,id);
 				wrappedAngle = randNorm(id,l, actualAngle, STD_BIRDANGLE);
 
 				if(wrappedAngle > 360){
@@ -656,19 +663,23 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 				uDir_value = DesiredSpeed * cosf(wrappedAngle * (pi/180));
 				vDir_value = DesiredSpeed * sinf(wrappedAngle * (pi/180));
 
+				if(id==34) printf("(Inside 6 hour flight) wrappedAngle: %f, uDir_value: %f,vDir_value: %f\n",wrappedAngle,uDir_value,vDir_value);
 				u_val = bilinear_interpolation_LargeData(pos_col,pos_row,udata,l-start_l); 
 				v_val = bilinear_interpolation_LargeData(pos_col,pos_row,vdata,l-start_l);
 				precip_val = bilinear_interpolation_LargeData(pos_col,pos_row,precipData,l-start_l);
 
+
+				if(id==34) printf("(Inside 6 hour flight) u_val: %f,v_val: %f\n",u_val,v_val);
 				//Getting the previous position values for row and column
 				pos_row = rowArray[id * arrLength + l - 1]; 
 				pos_col = colArray[id * arrLength + l - 1];
-				
+				if(id==34) printf("(Inside 6 hour flight) pos_row: %f,pos_col: %f,arrLength: %d,l: %d,(id:%d)\n",pos_row,pos_col,arrLength,l,id);
 				//printf("During 6 hour flight: Row: %f \t Col: %f (id:%d)\n\n\n",pos_row,pos_col,id);
 			
 				if((pos_row > LatSize-1)||(pos_row >= MaxLatSouth) || (pos_col > LongSize-1)||(pos_row < 0.0)||(pos_col < 0.0 )){
 					birdStatus[id] = 0;
-					printf("(In 6 hours flight) status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
+					
+					if(id==34) printf("(In 6 hours flight) status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
 					//printf("Dead bird \n");
 				}
 			
@@ -677,7 +688,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 				//Storing the new values
 				rowArray[id * arrLength + l] = pos_row + var_product * (v_val + vDir_value ) * 0.36 * -1;
 				colArray[id * arrLength + l] = pos_col + var_product * (u_val + uDir_value) * 0.36;
-					
+				if(id==34) printf("(Inside 6 hour flight) var_product: %d,var_profit_10m: %d,l_product: %d,uDir_value: %f,vDir_value: %f,row: %f,col: %f\n",var_product,var_profit_10m,l_product,uDir_value,vDir_value,rowArray[id * arrLength + l],colArray[id * arrLength + l]);
+		
 				//printf("6 Hour Flight\tRow: %f,Col:%f\n",rowArray[id * arrLength + l],colArray[id * arrLength + l]);
 				//printf("6 hour flight;Timestep #: %ld\n",l);
 				
@@ -702,10 +714,10 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 			// If the bird is at sea after the first 6 hours of flight 
 			if( index == 1.0){
 				var_sea = 0;
-				printf("Not at sea after 6 hours \n");
+				if(id==34) printf("Not at sea after 6 hours \n");
 			}else{
 				var_sea = 1;
-				printf("At sea after 6 hours \n");
+				if(id==34) printf("At sea after 6 hours \n");
 			}
 
 			//Getting the wrapped angle; Same uDir_value and vDir_value used for the 4 hours
@@ -721,6 +733,8 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 			vDir_value = DesiredSpeed * sinf(wrappedAngle * (pi/180));
 
 			prev_l = l;
+
+			if(id==34) printf("(After 6 hour flight) u_val: %f,v_val: %f\n",u_val,v_val);
 	//-----------------------At sea after first 6 hours of flight
 			for(k=6;k<10;k++){
 							
@@ -735,19 +749,20 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 				pos_row = pos_row + var_product * (v_val + vDir_value ) * 0.36 * -1;
 				pos_col = pos_col + var_product * (u_val + uDir_value)  * 0.36;
 
+				if(id==34) printf("(During +4 hour flight) u_val: %f,v_val: %f, var_product: %f,uDir_value: %d, vDir_value:%f\n",u_val,v_val,var_product,uDir_value,vDir_value);
 				
 				//printf("+4 Hour Flight\tRow: %f,Col:%f\n",pos_row,pos_col);
 				//printf("+4 hour flight;Timestep #: %ld\n",l);
 
 				if((pos_row > LatSize -1 )||(pos_row >= MaxLatSouth) || (pos_col > LongSize -1 )||(pos_row < 0.0)||(pos_col < 0.0 )){
 					birdStatus[id] = 0;
-					printf("(During +4 hour flight) status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
+					if(id==34) printf("(During +4 hour flight) status = 0; As pos_row = %f (id:%d)\n",pos_row,id);
 				}
 
 				rowArray[id * arrLength + l] = pos_row;
 
 				colArray[id * arrLength + l] = pos_col;
-				printf("During +4 hour flight: Row: %f \t Col: %f, u_val: %f, v_val: %f, l:%d (id:%d)\n\n\n",pos_row,pos_col,u_val,v_val,l,id);
+				if(id==34) printf("During +4 hour flight: Row: %f \t Col: %f, u_val: %f, v_val: %f, l:%d (id:%d)\n\n\n",pos_row,pos_col,u_val,v_val,l,id);
 				//printf("+4 Hour Flight\tRow: %f,Col:%f\n",rowArray[id * arrLength + l + 1],colArray[id * arrLength + l + 1]);
 			
 				l = l + l_product;
@@ -766,12 +781,16 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 				var_sea = 1;
 				//printf("At sea after 10 hours \n");
 			}
-		
+
+
+			
+
+
 	//----------------------- If at sea even after the 10 hours but within 24 hours		
 			var_product = birdStatus[id] * var_profit_10m * var_sea * l_product;
 			l = bird_AtSea_Within24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product,l_product,l_idx);
 	//------------------------						
-			printf("Timestep after bird_AtSea_Within24Hrs %d\n",l);
+			if(id==34) printf("Timestep after bird_AtSea_Within24Hrs %d\n",l);
 			
 			pos_row = rowArray[id * arrLength + l - 1]; //Why -1 ?
 			pos_col = colArray[id * arrLength + l - 1];
@@ -780,10 +799,10 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 			index = lwData[__float2int_rd(pos_row * LongSize + pos_col)];
 			if(index == 1.0){
 				var_sea = 0;
-				printf("Var_sea: Not at sea after 24 hours (id:%d) \n",id);
+				if(id==34) printf("Var_sea: Not at sea after 24 hours (id:%d) \n",id);
 			}else{
 				var_sea = 1;
-				printf("Var_sea: At sea after 24 hours (id:%d) \n",id);
+				if(id==34) printf("Var_sea: At sea after 24 hours (id:%d) \n",id);
 			}
 			//printf("After getting the index \n");
 	//----------------------- If at sea even after the the 10 hours and beyond 24 hours 	
@@ -791,16 +810,16 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 		
 			var_product = birdStatus[id] * var_profit_10m * var_sea * l_product;
 			if(var_product == 1){ 
-				printf("Var product = 1 : Calculations done for at sea after 24 hours(id:%d) \n",id);
+				if(id==34) printf("Var product = 1 : Calculations done for at sea after 24 hours(id:%d) \n",id);
 			}else{
-				printf("Var product = 0; No calculations for at sea after 24 hours (id:%d) \n",id);
+				if(id==34) printf("Var product = 0; No calculations for at sea after 24 hours (id:%d) \n",id);
 			}
 			//printf("After the variable product \n");
 
-			printf("birdStatus[%d]: %d,var_profit_10m: %d,var_sea: %d,l_product: %d \n",id,birdStatus[id],var_profit_10m,var_sea,l_product);
+			if(id==34) printf("birdStatus[%d]: %d,var_profit_10m: %d,var_sea: %d,l_product: %d \n",id,birdStatus[id],var_profit_10m,var_sea,l_product);
 			//printf("The current value of l is: %ld And of start_l is: %ld \n\n",l,start_l);
 			l = bird_AtSea_After24Hrs(id,arrLength,rowArray,colArray,start_l,l,udata,vdata,lwData,birdStatus,var_product,l_product);
-			printf("Timestep after bird_AtSea_After24Hrs %d (id: %d)\n",l,id);
+			if(id==34) printf("Timestep after bird_AtSea_After24Hrs %d (id: %d)\n",l,id);
 			//days = (l - start_l)/TIMESTEPS_PER_DAY;
 			//printf("Days: %d\n",days);
 			//printf("After bird_AtSea_After24Hrs and before regression calculations \n");
@@ -836,11 +855,11 @@ __global__ void bird_movement(float* rowArray,float* colArray,int NumOfBirds,int
 			}
 			
 			
-			printf("l: %d,birdTimesteps[id]: %d (id:%d)\n",l,birdTimesteps[id],id);
+			if(id==34) printf("l: %d,birdTimesteps[id]: %d (id:%d)\n",l,birdTimesteps[id],id);
 			days++;
-			printf("Days: %d (id:%d)\n",days,id);
-			printf("Row: %f \t Col: %f (id:%d)\n\n\n",pos_row,pos_col,id);
-			printf("--------------------------------------------------------------\n");
+			if(id==34) printf("Days: %d (id:%d)\n",days,id);
+			if(id==34) printf("Row: %f \t Col: %f (id:%d)\n\n\n",pos_row,pos_col,id);
+			if(id==34) printf("--------------------------------------------------------------\n");
 			l = l + l_product;
 					
 		}
