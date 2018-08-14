@@ -1272,7 +1272,7 @@ int main(int argc,char* argv[])
 	uint8_t *h_birdStatus,*d_birdStatus;
 
 	//Pinned memory is faster than non-pinned memory only if the amount of transferred data
-	//is above 16GB 
+	//is above 16MB 
 	// https://www.cs.virginia.edu/~mwb7w/cuda_support/pinned_tradeoff.html
 
 	dirData = (float*) malloc(LAT_SIZE * LONG_SIZE * sizeof(float));
